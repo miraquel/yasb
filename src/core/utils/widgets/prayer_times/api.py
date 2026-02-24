@@ -1,7 +1,6 @@
 import json
 import logging
 import traceback
-from datetime import datetime
 from typing import Callable
 
 from PyQt6.QtCore import QObject, QTimer, QUrl, pyqtSignal
