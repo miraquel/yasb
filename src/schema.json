@@ -1,0 +1,604 @@
+{
+  "$defs": {
+    "BarAlignment": {
+      "additionalProperties": false,
+      "properties": {
+        "position": {
+          "default": "top",
+          "enum": [
+            "top",
+            "bottom"
+          ],
+          "title": "Position",
+          "type": "string"
+        },
+        "center": {
+          "default": false,
+          "title": "Center",
+          "type": "boolean"
+        },
+        "align": {
+          "default": "center",
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ],
+          "title": "Align",
+          "type": "string"
+        }
+      },
+      "title": "BarAlignment",
+      "type": "object"
+    },
+    "BarAnimation": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "duration": {
+          "default": 500,
+          "minimum": 0,
+          "title": "Duration",
+          "type": "integer"
+        },
+        "type": {
+          "default": "slide",
+          "enum": [
+            "slide",
+            "fade"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "BarAnimation",
+      "type": "object"
+    },
+    "BarBlurEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "dark_mode": {
+          "default": false,
+          "title": "Dark Mode",
+          "type": "boolean"
+        },
+        "acrylic": {
+          "default": false,
+          "title": "Acrylic",
+          "type": "boolean"
+        },
+        "round_corners": {
+          "default": false,
+          "title": "Round Corners",
+          "type": "boolean"
+        },
+        "round_corners_type": {
+          "default": "normal",
+          "enum": [
+            "normal",
+            "small"
+          ],
+          "title": "Round Corners Type",
+          "type": "string"
+        },
+        "border_color": {
+          "default": "System",
+          "title": "Border Color",
+          "type": "string"
+        }
+      },
+      "title": "BarBlurEffect",
+      "type": "object"
+    },
+    "BarConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "screens": {
+          "default": [
+            "*"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Screens",
+          "type": "array"
+        },
+        "class_name": {
+          "default": "yasb-bar",
+          "title": "Class Name",
+          "type": "string"
+        },
+        "context_menu": {
+          "default": true,
+          "title": "Context Menu",
+          "type": "boolean"
+        },
+        "alignment": {
+          "$ref": "#/$defs/BarAlignment",
+          "default": {
+            "position": "top",
+            "center": false,
+            "align": "center"
+          }
+        },
+        "blur_effect": {
+          "$ref": "#/$defs/BarBlurEffect",
+          "default": {
+            "enabled": false,
+            "dark_mode": false,
+            "acrylic": false,
+            "round_corners": false,
+            "round_corners_type": "normal",
+            "border_color": "System"
+          }
+        },
+        "animation": {
+          "$ref": "#/$defs/BarAnimation",
+          "default": {
+            "enabled": true,
+            "duration": 500,
+            "type": "slide"
+          }
+        },
+        "window_flags": {
+          "$ref": "#/$defs/BarWindowFlags",
+          "default": {
+            "always_on_top": false,
+            "windows_app_bar": false,
+            "hide_on_fullscreen": false,
+            "hide_on_maximized": false,
+            "auto_hide": false
+          }
+        },
+        "dimensions": {
+          "$ref": "#/$defs/BarDimensions",
+          "default": {
+            "width": "100%",
+            "height": 30
+          }
+        },
+        "padding": {
+          "$ref": "#/$defs/BarPadding",
+          "default": {
+            "top": 0,
+            "left": 0,
+            "bottom": 0,
+            "right": 0
+          }
+        },
+        "widgets": {
+          "$ref": "#/$defs/BarWidgets",
+          "default": {
+            "left": [],
+            "center": [],
+            "right": []
+          }
+        },
+        "layouts": {
+          "$ref": "#/$defs/BarLayouts",
+          "default": {
+            "left": {
+              "alignment": "left",
+              "stretch": true
+            },
+            "center": {
+              "alignment": "center",
+              "stretch": true
+            },
+            "right": {
+              "alignment": "right",
+              "stretch": true
+            }
+          }
+        }
+      },
+      "title": "BarConfig",
+      "type": "object"
+    },
+    "BarDimensions": {
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "default": "100%",
+          "title": "Width"
+        },
+        "height": {
+          "default": 30,
+          "minimum": 0,
+          "title": "Height",
+          "type": "integer"
+        }
+      },
+      "title": "BarDimensions",
+      "type": "object"
+    },
+    "BarLayout": {
+      "additionalProperties": false,
+      "properties": {
+        "alignment": {
+          "default": "left",
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ],
+          "title": "Alignment",
+          "type": "string"
+        },
+        "stretch": {
+          "default": true,
+          "title": "Stretch",
+          "type": "boolean"
+        }
+      },
+      "title": "BarLayout",
+      "type": "object"
+    },
+    "BarLayouts": {
+      "additionalProperties": false,
+      "properties": {
+        "left": {
+          "$ref": "#/$defs/BarLayout",
+          "default": {
+            "alignment": "left",
+            "stretch": true
+          }
+        },
+        "center": {
+          "$ref": "#/$defs/BarLayout",
+          "default": {
+            "alignment": "center",
+            "stretch": true
+          }
+        },
+        "right": {
+          "$ref": "#/$defs/BarLayout",
+          "default": {
+            "alignment": "right",
+            "stretch": true
+          }
+        }
+      },
+      "title": "BarLayouts",
+      "type": "object"
+    },
+    "BarPadding": {
+      "additionalProperties": false,
+      "properties": {
+        "top": {
+          "default": 0,
+          "title": "Top",
+          "type": "integer"
+        },
+        "left": {
+          "default": 0,
+          "title": "Left",
+          "type": "integer"
+        },
+        "bottom": {
+          "default": 0,
+          "title": "Bottom",
+          "type": "integer"
+        },
+        "right": {
+          "default": 0,
+          "title": "Right",
+          "type": "integer"
+        }
+      },
+      "title": "BarPadding",
+      "type": "object"
+    },
+    "BarWidgets": {
+      "additionalProperties": false,
+      "properties": {
+        "left": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Left",
+          "type": "array"
+        },
+        "center": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Center",
+          "type": "array"
+        },
+        "right": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Right",
+          "type": "array"
+        }
+      },
+      "title": "BarWidgets",
+      "type": "object"
+    },
+    "BarWindowFlags": {
+      "additionalProperties": false,
+      "properties": {
+        "always_on_top": {
+          "default": false,
+          "title": "Always On Top",
+          "type": "boolean"
+        },
+        "windows_app_bar": {
+          "default": false,
+          "title": "Windows App Bar",
+          "type": "boolean"
+        },
+        "hide_on_fullscreen": {
+          "default": false,
+          "title": "Hide On Fullscreen",
+          "type": "boolean"
+        },
+        "hide_on_maximized": {
+          "default": false,
+          "title": "Hide On Maximized",
+          "type": "boolean"
+        },
+        "auto_hide": {
+          "default": false,
+          "title": "Auto Hide",
+          "type": "boolean"
+        }
+      },
+      "title": "BarWindowFlags",
+      "type": "object"
+    },
+    "GlazeWMConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "start_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "glazewm.exe start",
+          "title": "Start Command"
+        },
+        "stop_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "glazewm.exe command wm-exit",
+          "title": "Stop Command"
+        },
+        "reload_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "glazewm.exe command wm-exit && glazewm.exe start",
+          "title": "Reload Command"
+        }
+      },
+      "title": "GlazeWMConfig",
+      "type": "object"
+    },
+    "KomorebiConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "start_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "komorebic start --whkd",
+          "title": "Start Command"
+        },
+        "stop_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "komorebic stop --whkd",
+          "title": "Stop Command"
+        },
+        "reload_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "komorebic reload-configuration",
+          "title": "Reload Command"
+        }
+      },
+      "title": "KomorebiConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "watch_config": {
+      "default": true,
+      "title": "Watch Config",
+      "type": "boolean"
+    },
+    "watch_stylesheet": {
+      "default": true,
+      "title": "Watch Stylesheet",
+      "type": "boolean"
+    },
+    "debug": {
+      "default": false,
+      "title": "Debug",
+      "type": "boolean"
+    },
+    "env_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Env File"
+    },
+    "update_check": {
+      "default": true,
+      "title": "Update Check",
+      "type": "boolean"
+    },
+    "show_systray": {
+      "default": true,
+      "title": "Show Systray",
+      "type": "boolean"
+    },
+    "komorebi": {
+      "$ref": "#/$defs/KomorebiConfig",
+      "default": {
+        "start_command": "komorebic start --whkd",
+        "stop_command": "komorebic stop --whkd",
+        "reload_command": "komorebic reload-configuration"
+      }
+    },
+    "glazewm": {
+      "$ref": "#/$defs/GlazeWMConfig",
+      "default": {
+        "start_command": "glazewm.exe start",
+        "stop_command": "glazewm.exe command wm-exit",
+        "reload_command": "glazewm.exe command wm-exit && glazewm.exe start"
+      }
+    },
+    "bars": {
+      "additionalProperties": {
+        "$ref": "#/$defs/BarConfig"
+      },
+      "default": {
+        "yasb-bar": {
+          "alignment": {
+            "align": "center",
+            "center": false,
+            "position": "top"
+          },
+          "animation": {
+            "duration": 500,
+            "enabled": true,
+            "type": "slide"
+          },
+          "blur_effect": {
+            "acrylic": false,
+            "border_color": "System",
+            "dark_mode": false,
+            "enabled": false,
+            "round_corners": false,
+            "round_corners_type": "normal"
+          },
+          "class_name": "yasb-bar",
+          "context_menu": true,
+          "dimensions": {
+            "height": 30,
+            "width": "100%"
+          },
+          "enabled": true,
+          "layouts": {
+            "center": {
+              "alignment": "center",
+              "stretch": true
+            },
+            "left": {
+              "alignment": "left",
+              "stretch": true
+            },
+            "right": {
+              "alignment": "right",
+              "stretch": true
+            }
+          },
+          "padding": {
+            "bottom": 0,
+            "left": 0,
+            "right": 0,
+            "top": 0
+          },
+          "screens": [
+            "*"
+          ],
+          "widgets": {
+            "center": [],
+            "left": [],
+            "right": []
+          },
+          "window_flags": {
+            "always_on_top": false,
+            "auto_hide": false,
+            "hide_on_fullscreen": false,
+            "hide_on_maximized": false,
+            "windows_app_bar": false
+          }
+        }
+      },
+      "title": "Bars",
+      "type": "object"
+    },
+    "widgets": {
+      "additionalProperties": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Widgets",
+      "type": "object"
+    }
+  },
+  "required": [
+    "widgets"
+  ],
+  "title": "ExportYasbConfig",
+  "type": "object"
+}
