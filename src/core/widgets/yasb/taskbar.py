@@ -58,8 +58,8 @@ class BadgeLabel(QLabel):
         self._badge_count = count
         self.update()
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
+    def paintEvent(self, a0):
+        super().paintEvent(a0)
         if not self._show_badge or self._badge_cfg is None or not self._badge_cfg.enabled:
             return
 
@@ -1939,7 +1939,7 @@ class TaskbarWidget(BaseWidget):
             self._overlay_monitor.counts_updated.connect(self._on_overlay_counts_updated)
             self._overlay_monitor.start()
         except Exception as exc:
-            logging.warning(f"TaskbarWidget: failed to start overlay monitor: {exc}")
+            logging.warning("TaskbarWidget: failed to start overlay monitor: %s", exc)
             self._overlay_monitor = None
 
     def _on_overlay_counts_updated(self, counts: dict) -> None:
@@ -1985,7 +1985,12 @@ class TaskbarWidget(BaseWidget):
             return
 
         is_flashing = hwnd in self._flashing_animation
-        if not is_flashing and hasattr(self, "_task_manager") and self._task_manager and hwnd in self._task_manager._windows:
+        if (
+            not is_flashing
+            and hasattr(self, "_task_manager")
+            and self._task_manager
+            and hwnd in self._task_manager._windows
+        ):
             try:
                 is_flashing = bool(getattr(self._task_manager._windows[hwnd], "is_flashing", False))
             except Exception:
