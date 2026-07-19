@@ -43,6 +43,17 @@ build_options = {
     "includes": [
         "holidays.countries",
         "winrt.windows.applicationmodel",
+        "winrt.windows.applicationmodel.datatransfer",
+        "winrt.windows.data.xml.dom",
+        "winrt.windows.devices.wifi",
+        "winrt.windows.management.deployment",
+        "winrt.windows.media.control",
+        "winrt.windows.networking.connectivity",
+        "winrt.windows.security.credentials",
+        "winrt.windows.storage.streams",
+        "winrt.windows.ui.notifications",
+        "winrt.windows.ui.notifications.management",
+        "winrt.windows.ui.viewmanagement",
     ],
     "optimize": 1,
     "include_files": [
