@@ -16,6 +16,10 @@ class ClaudeUsageCallbacksConfig(CallbacksConfig):
 
 
 class ClaudeUsageMenuConfig(CustomBaseModel):
+    # Path to an image shown at the left of the popup header. The mark already identifies
+    # the widget on the bar, so repeating it here lets a pinned or detached popup say what it
+    # belongs to on its own. Blank leaves the header as it was.
+    icon: str = ""
     blur: bool = True
     round_corners: bool = True
     round_corners_type: str = "normal"
@@ -70,6 +74,9 @@ class ClaudeUsageConfig(CustomBaseModel):
     five_hour_reset_format: Literal["relative", "absolute"] = "relative"
     seven_day_reset_format: Literal["relative", "absolute"] = "absolute"
     reset_show_date: bool = True
+    # Show which account the numbers belong to, under the popup title and in the tooltip.
+    # Worth turning off if you screenshot the bar, since it puts an email on screen.
+    show_account: bool = True
     # Clock style for every time the popup renders. 24h also drops the AM/PM suffix.
     time_format: Literal["12h", "24h"] = "12h"
     # strftime template for the exact reset timestamp under each window. The default keeps

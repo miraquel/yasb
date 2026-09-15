@@ -81,6 +81,7 @@ claude_usage:
       direction: "down"
       offset_top: 6
       offset_left: 0
+      icon: "C:/Users/you/.config/yasb/assets/claude.png"
 ```
 
 ## Description of Options
@@ -109,6 +110,8 @@ claude_usage:
   - **alignment:** Horizontal alignment of the menu (`left`, `right`, `center`).
   - **direction:** Whether the menu opens `down` or `up`.
   - **offset_top / offset_left:** Pixel offsets for fine positioning.
+  - **icon:** Path to an image drawn at 22x22 at the left of the popup header, beside the title and account line. Any
+    format Qt can read works (PNG, SVG, JPEG). Leave it empty for a header with no mark.
   - **pin_icon / unpin_icon:** Nerd Font glyphs for the pin button in the popup header. The button keeps the popup open and lets it be dragged when pinned.
 
 ## Authentication
@@ -240,8 +243,11 @@ bar is the inverse, because that widget reports remaining rather than used.)
 .claude-usage .status.critical {}
 /* Popup menu */
 .claude-usage-menu {}
-.claude-usage-menu .header {}        /* header row (title + refresh button) */
-.claude-usage-menu .header .text {}  /* "Claude Usage" title */
+.claude-usage-menu .header {}            /* header row (mark, title stack, buttons) */
+.claude-usage-menu .header .app-icon {}  /* product mark, when menu.icon is set */
+.claude-usage-menu .header .title-stack {}  /* title and account, stacked */
+.claude-usage-menu .header .text {}      /* "Claude Usage" title */
+.claude-usage-menu .header .account {}   /* signed-in account e-mail */
 .claude-usage-menu .header .refresh {}        /* refresh button */
 .claude-usage-menu .header .refresh:hover {}
 .claude-usage-menu .status-row {}             /* status line below the header (show_in_menu) */
@@ -324,6 +330,13 @@ colours to taste.
     font-size: 15px;
     font-weight: 600;
 }
+.claude-usage-menu .header .app-icon {
+    padding-right: 10px;
+}
+.claude-usage-menu .header .account {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 11px;
+}
 .claude-usage-menu .header .refresh,
 .claude-usage-menu .header .pin-btn {
     color: rgba(255, 255, 255, 0.6);
@@ -377,12 +390,16 @@ colours to taste.
     min-height: 8px;
     max-height: 8px;
 }
+/* The bar rests in the product's own colour, so the popup and the bar button that opened
+   it read as one thing, then escalates away from it - identity never looks like a warning. */
 .claude-usage-menu .progress .fill {
-    background-color: #47AFF5;
+    background-color: #fab387;
     border-radius: 4px;
 }
-.claude-usage-menu .progress.medium .fill { background-color: #ffc83d; }
-.claude-usage-menu .progress.high .fill { background-color: #ff6b6b; }
+/* Maroon rather than amber: amber sits next to Claude's peach, and a warning you cannot
+   tell from the resting colour is not a warning. */
+.claude-usage-menu .progress.medium .fill { background-color: #eba0ac; }
+.claude-usage-menu .progress.high .fill { background-color: #f38ba8; }
 .claude-usage-menu .reset {
     color: rgba(255, 255, 255, 0.6);
     font-size: 12px;

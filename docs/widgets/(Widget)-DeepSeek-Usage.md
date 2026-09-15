@@ -30,6 +30,8 @@ The data comes from DeepSeek's `GET /user/balance` endpoint using your platform 
 | `update_interval` | integer | `60` | How often the label is refreshed, in seconds (30-3600). |
 | `cache_ttl` | integer | `120` | How long a fetched result is cached on disk before the endpoint is queried again. |
 | `low_balance_threshold` | float | `0.0` | Show the `{low}` glyph when the balance falls below this. `0` disables the threshold (the glyph still appears if DeepSeek reports the account cannot make calls). |
+| `show_account` | boolean | `true` | Show the account line under the popup title and in the bar tooltip. |
+| `account_label` | string | `""` | What to call this account. Blank falls back to a masked fingerprint of the key in use, e.g. `sk-…1e06`. |
 | `spend_history` | dict | `{'enabled': true, ...}` | Spend tracking and the popup's Spend section. See [Spend history](#spend-history). |
 | `budget` | dict | `{'enabled': false, ...}` | An optional budget to measure spend against. See [Budget](#budget). |
 | `low_icon` | string | `''` | Glyph used by `{low}`. |
@@ -78,6 +80,7 @@ deepseek_usage:
     update_interval: 60
     cache_ttl: 120
     low_balance_threshold: 5.0
+    account_label: "you@example.com"
     spend_history:
       enabled: true
       default_period: "today"
@@ -99,6 +102,7 @@ deepseek_usage:
       direction: "down"
       offset_top: 6
       offset_left: 0
+      icon: "C:/Users/you/.config/yasb/assets/deepseek.png"
 ```
 
 ## Description of Options
@@ -112,6 +116,12 @@ deepseek_usage:
 - **update_interval:** How often the label is refreshed. This also sets the resolution of the spend history: spend is attributed to the moment it is *observed*, so a longer interval means coarser buckets.
 - **cache_ttl:** How long a fetched result is cached on disk before the endpoint is queried again. On any error the widget serves the last cached balance instead of going blank.
 - **low_balance_threshold:** The balance below which `{low}` appears. The glyph also appears whenever DeepSeek's `is_available` flag says the account can no longer make calls, regardless of this setting.
+- **show_account:** Whether the popup header and bar tooltip name the account.
+- **account_label:** What to call the account. DeepSeek's API carries no identity of its
+  own - `/user/balance` returns money and nothing else - so unlike the Claude and Codex
+  widgets there is no e-mail to read. Set this to whatever names the account to you. Left
+  blank, the header shows a masked fingerprint of the key in use (`sk-…1e06`), which is
+  enough to tell two accounts apart on one machine and far too little to reconstruct a key.
 - **tooltip:** Whether to show a summary tooltip on hover.
 - **callbacks:** Mouse-click callbacks. Built-in actions: `toggle_menu`, `toggle_label`, `refresh` (force an immediate re-fetch, bypassing `cache_ttl`), `do_nothing`, and `exec`.
 - **menu:** A dictionary specifying the popup menu settings:
@@ -122,6 +132,8 @@ deepseek_usage:
   - **alignment:** Horizontal alignment of the menu (`left`, `right`, `center`).
   - **direction:** Whether the menu opens `down` or `up`.
   - **offset_top / offset_left:** Pixel offsets for fine positioning.
+  - **icon:** Path to an image drawn at 22x22 at the left of the popup header, beside the title. Any
+    format Qt can read works (PNG, SVG, JPEG). Leave it empty for a header with no mark.
   - **show_breakdown:** Show the Topped-up / Granted rows under the balance.
   - **pin_icon / unpin_icon:** Nerd Font glyphs for the pin button in the popup header.
 
@@ -241,12 +253,17 @@ failed result would difference a balance against itself.
 .deepseek-usage-menu .section {}                /* every popup section */
 .deepseek-usage-menu .section .title {}
 /* Balance */
-.deepseek-usage-menu .section.balance {}
-.deepseek-usage-menu .section.balance .balance-total {}      /* the large balance figure */
-.deepseek-usage-menu .section.balance .balance-total.low {}  /* below low_balance_threshold */
-.deepseek-usage-menu .section.balance .row {}                /* Topped-up / Granted rows */
-.deepseek-usage-menu .section.balance .row .caption {}
-.deepseek-usage-menu .section.balance .row .value {}
+.deepseek-usage-menu .header .app-icon {}        /* product mark, when menu.icon is set */
+.deepseek-usage-menu .header .title-stack {}     /* title and account, stacked */
+.deepseek-usage-menu .header .account {}         /* account_label, or the key fingerprint */
+.deepseek-usage-menu .section.balance.hero {}
+.deepseek-usage-menu .section.hero .hero-value {}      /* the large balance figure */
+.deepseek-usage-menu .section.hero .hero-value.low {}  /* below low_balance_threshold */
+.deepseek-usage-menu .section.hero .hero-caption {}    /* "available to spend" */
+.deepseek-usage-menu .section.hero .ledger {}          /* Topped-up / Granted rows */
+.deepseek-usage-menu .section.hero .ledger .row {}
+.deepseek-usage-menu .section.hero .ledger .row .name {}
+.deepseek-usage-menu .section.hero .ledger .row .value {}
 /* Budget */
 .deepseek-usage-menu .section.budget {}
 .deepseek-usage-menu .section.budget .progress {}                /* progress-bar track */
@@ -374,6 +391,8 @@ to taste.
     max-height: 6px;
     margin: 16px 0 13px 0;
 }
+/* The bar rests in the product's own colour, so the popup and the bar button that opened
+   it read as one thing, then escalates away from it - identity never looks like a warning. */
 .deepseek-usage-menu .section .progress .fill {
     background-color: #74c7ec;
     border-radius: 3px;
@@ -382,26 +401,48 @@ to taste.
 .deepseek-usage-menu .section .progress.high .fill     { background-color: #fab387; }
 .deepseek-usage-menu .section .progress.critical .fill { background-color: #f38ba8; }
 
-/* Balance */
-.deepseek-usage-menu .section.balance .balance-total {
+/* Header mark */
+.deepseek-usage-menu .header .app-icon {
+    padding-right: 10px;
+}
+.deepseek-usage-menu .header .account {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.55);
+    padding-top: 2px;
+}
+
+/* Balance, as the hero of the popup */
+.deepseek-usage-menu .section.balance.hero {
+    padding: 20px 18px 16px 18px;
+}
+.deepseek-usage-menu .section.hero .hero-value {
     font-family: 'Segoe UI';
-    font-size: 24px;
+    font-size: 34px;
     font-weight: 700;
     color: #cdd6f4;
-    padding: 10px 0 8px 0;
 }
-.deepseek-usage-menu .section.balance .balance-total.low {
+.deepseek-usage-menu .section.hero .hero-value.low {
     color: #f9e2af;
 }
-.deepseek-usage-menu .section.balance .row {
-    padding: 3px 0;
+.deepseek-usage-menu .section.hero .hero-caption {
+    font-family: 'Segoe UI';
+    font-size: 11px;
+    font-weight: 600;
+    color: #a6adc8;
+    padding-top: 2px;
 }
-.deepseek-usage-menu .section.balance .row .caption {
+.deepseek-usage-menu .section.hero .ledger {
+    padding-top: 14px;
+}
+.deepseek-usage-menu .section.hero .ledger .row {
+    padding: 4px 0;
+}
+.deepseek-usage-menu .section.hero .ledger .row .name {
     font-family: 'Segoe UI';
     font-size: 11px;
     color: #a6adc8;
 }
-.deepseek-usage-menu .section.balance .row .value {
+.deepseek-usage-menu .section.hero .ledger .row .value {
     font-family: 'Segoe UI';
     font-size: 11px;
     font-weight: 600;

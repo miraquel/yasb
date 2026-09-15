@@ -22,7 +22,13 @@ from PyQt6.QtWidgets import (
 
 from core.utils.qobject import is_valid_qobject
 from core.utils.tooltip import set_tooltip
-from core.utils.utilities import PopupWidget, build_progress_widget, refresh_widget_style
+from core.utils.utilities import (
+    PopupWidget,
+    align_label_ink,
+    align_label_text,
+    build_progress_widget,
+    refresh_widget_style,
+)
 from core.validation.widgets.yasb.codex_usage import CodexUsageConfig
 from core.widgets.base import BaseWidget
 from core.widgets.services.codex_usage.codex_api import CodexUsageService
@@ -177,6 +183,7 @@ class CodexUsageWidget(BaseWidget):
         self._menu: PopupWidget | None = None
         self._section_widgets: dict[str, dict[str, Any]] = {}
         self._detail_widgets: dict[str, QLabel] = {}
+        self._detail_names: dict[str, QLabel] = {}
         self._pages: dict[str, QFrame] = {}
         self._visible_pages: list[str] = []
         self._current_page = "overview"
@@ -190,6 +197,7 @@ class CodexUsageWidget(BaseWidget):
         self._token_widgets: dict[str, QLabel] = {}
         self._reset_credit_widgets: list[dict[str, Any]] = []
         self._reset_credits_count: QLabel | None = None
+        self._reset_credits_header: QFrame | None = None
         self._reset_credits_empty: QLabel | None = None
         self._heatmap_cells: list[QFrame] = []
         self._heatmap_month = date.today().replace(day=1)
@@ -198,6 +206,8 @@ class CodexUsageWidget(BaseWidget):
         self._heatmap_next: QPushButton | None = None
         self._heatmap_history_note: QLabel | None = None
         self._model_widgets: list[dict[str, Any]] = []
+        self._plan_label: QLabel | None = None
+        self._menu_title_label: QLabel | None = None
         self._refresh_button: RefreshButton | None = None
         self._refresh_status: QLabel | None = None
         self._refresh_pending = False
@@ -212,6 +222,7 @@ class CodexUsageWidget(BaseWidget):
             self.config.cache_ttl,
             self.config.timeout,
             self.config.show_token_usage,
+            self.config.show_account,
         )
         self._data: dict[str, Any] = self._service.latest()
 
@@ -376,6 +387,45 @@ class CodexUsageWidget(BaseWidget):
             "stale": self.config.stale_icon if self._data.get("stale") else "",
         }
 
+    def _build_header_icon(self) -> QLabel | None:
+        """The product mark at the left of the header, when a path is configured.
+
+        Rendered as rich text rather than a QPixmap so the same <img> the bar label accepts
+        works here, and a missing file degrades to an empty label instead of raising.
+        """
+        path = (self.config.menu.icon or "").strip()
+        if not path:
+            return None
+        label = QLabel(f"<img src='{path}' width='22' height='22'>")
+        label.setProperty("class", "app-icon")
+        return label
+
+    def _account_line(self) -> str:
+        """Who these numbers belong to: the signed-in email.
+
+        Comes from the app-server's account/read, so the widget still never opens
+        ~/.codex/auth.json. Falls back to the plan when an older CLI has no account method,
+        and to nothing at all when signed out - the caller then omits the line.
+        """
+        if not self.config.show_account:
+            return ""
+        email = str(self._data.get("email") or "").strip()
+        if email:
+            return email
+        plan = str(self._data.get("plan") or "").strip()
+        return f"{plan.lower()} plan" if plan else ""
+
+    def _account_tooltip(self) -> str:
+        """Email and plan together, where the header line has room for only one."""
+        parts = []
+        email = str(self._data.get("email") or "").strip()
+        plan = str(self._data.get("plan") or "").strip()
+        if email:
+            parts.append(email)
+        if plan:
+            parts.append(f"{plan.lower()} plan")
+        return "\n".join(parts)
+
     def _mode_value(self, window: dict[str, Any]) -> str:
         key = "used" if self._usage_mode == "used" else "remaining"
         return self._percent(window.get(key))
@@ -426,19 +476,22 @@ class CodexUsageWidget(BaseWidget):
         if self.config.tooltip:
             primary = self._window("primary")
             secondary = self._window("secondary")
-            lines = [
-                f"Codex {self._duration_name(primary.get('duration_mins'), 'primary')}: "
-                f"{self._percent(primary.get('remaining'))}% remaining "
-                f"({self._percent(primary.get('used'))}% used)",
-            ]
+            mode_key = "used" if self._usage_mode == "used" else "remaining"
+            mode_word = self.config.mode_label_used if self._usage_mode == "used" else self.config.mode_label_remaining
+
+            def window_line(window: dict[str, Any], fallback: str) -> str:
+                name = self._duration_name(window.get("duration_mins"), fallback)
+                return f"Codex {name}: {self._percent(window.get(mode_key))}% {mode_word}"
+
+            lines = [window_line(primary, "primary")]
             if secondary:
-                lines.append(
-                    f"Codex {self._duration_name(secondary.get('duration_mins'), 'secondary')}: "
-                    f"{self._percent(secondary.get('remaining'))}% remaining "
-                    f"({self._percent(secondary.get('used'))}% used)"
-                )
+                lines.append(window_line(secondary, "secondary"))
+            account = self._account_line()
+            if account:
+                lines.append(account)
             if self._data.get("stale"):
-                lines.append(f"Cached data: {self._data.get('error') or 'refresh pending'}")
+                reason = str(self._data.get("error") or "").strip()
+                lines.append(f"Cached - {reason}" if reason else "Cached")
             set_tooltip(self, "\n".join(lines))
         refresh_widget_style(*active_widgets)
 
@@ -462,57 +515,114 @@ class CodexUsageWidget(BaseWidget):
         self._menu.show()
         self._service.refresh_now()
 
+    @staticmethod
+    def _window_phrase(minutes: Any) -> str:
+        """A readable name for a rate-limit window, e.g. "1-week", "5-hour".
+
+        The short forms ("1w", "5h") suit the bar label, but the popup caption is a sentence
+        and reads badly with abbreviations in the middle of it.
+        """
+        if not isinstance(minutes, (int, float)) or minutes <= 0:
+            return "current"
+        minutes = int(minutes)
+        if minutes % 10080 == 0:
+            weeks = minutes // 10080
+            return f"{weeks}-week"
+        if minutes % 1440 == 0:
+            return f"{minutes // 1440}-day"
+        if minutes % 60 == 0:
+            return f"{minutes // 60}-hour"
+        return f"{minutes}-minute"
+
     def _build_section(self, name: str, fallback_title: str) -> QFrame:
+        """The primary window leads; a secondary window, when an account has one, trails.
+
+        The reading used to state the same fact twice - "4% used" beside "96% remaining" at
+        equal weight - so neither was the answer. usage_mode now decides which way round the
+        single number reads, and the caption says which, so the second number is redundant.
+        """
+        if name == "primary":
+            return self._build_window_hero(name)
+        return self._build_window_row(name, fallback_title)
+
+    def _build_window_hero(self, name: str) -> QFrame:
         section = QFrame()
-        section.setProperty("class", f"section {name}")
+        section.setProperty("class", f"section {name} hero")
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        title = QLabel(fallback_title)
-        title.setProperty("class", "title")
-        # AlignLeft keeps the label at its own width so a CSS background renders as a pill
-        # hugging the text, matching the Claude popup; a filled QLabel would band the row.
-        layout.addWidget(title, 0, Qt.AlignmentFlag.AlignLeft)
+        value = QLabel("--%")
+        value.setProperty("class", "hero-value unknown")
+        layout.addWidget(value, 0, Qt.AlignmentFlag.AlignLeft)
+
+        # A sentence rather than a chip: it has to carry both which window this is and which
+        # way the number reads, and a chip repeating the window name would say half of that.
+        caption = QLabel("")
+        caption.setProperty("class", "hero-caption")
+        layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
 
         progress = UsageBar(0, "unknown")
         layout.addWidget(progress)
-
-        stats = QFrame()
-        stats.setProperty("class", "stats")
-        stats_layout = QHBoxLayout(stats)
-        stats_layout.setContentsMargins(0, 0, 0, 0)
-        stats_layout.setSpacing(0)
-        used = QLabel("--% used")
-        used.setProperty("class", "used")
-        stats_layout.addWidget(used)
-        stats_layout.addStretch()
-        remaining = QLabel("--% remaining")
-        remaining.setProperty("class", "remaining unknown")
-        stats_layout.addWidget(remaining)
-        layout.addWidget(stats)
 
         timing = QFrame()
         timing.setProperty("class", "timing")
         timing_layout = QHBoxLayout(timing)
         timing_layout.setContentsMargins(0, 0, 0, 0)
         timing_layout.setSpacing(8)
-        reset = QLabel("Reset unknown")
+        reset = QLabel("Reset time unknown")
         reset.setProperty("class", "reset")
         timing_layout.addWidget(reset)
         timing_layout.addStretch()
         date = QLabel("--")
         date.setProperty("class", "date")
+        date.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         timing_layout.addWidget(date)
         layout.addWidget(timing)
+
         self._section_widgets[name] = {
+            "variant": "hero",
+            "frame": section,
+            "value": value,
+            "caption": caption,
+            "progress": progress,
+            "reset": reset,
+            "date": date,
+        }
+        return section
+
+    def _build_window_row(self, name: str, fallback_title: str) -> QFrame:
+        """Compact single line, matching the Claude popup's secondary windows."""
+        section = QFrame()
+        section.setProperty("class", f"section {name} ledger")
+        layout = QHBoxLayout(section)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        title = QLabel(fallback_title)
+        title.setProperty("class", "name")
+        layout.addWidget(title)
+
+        progress = UsageBar(0, "unknown")
+        layout.addWidget(progress, 1)
+
+        percent = QLabel("--%")
+        percent.setProperty("class", "percent unknown")
+        percent.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(percent)
+
+        countdown = QLabel("--")
+        countdown.setProperty("class", "countdown")
+        countdown.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(countdown)
+
+        self._section_widgets[name] = {
+            "variant": "ledger",
             "frame": section,
             "title": title,
             "progress": progress,
-            "reset": reset,
-            "used": used,
-            "remaining": remaining,
-            "date": date,
+            "percent": percent,
+            "countdown": countdown,
         }
         return section
 
@@ -554,17 +664,15 @@ class CodexUsageWidget(BaseWidget):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(8)
-        title = QLabel("Usage limit resets")
-        title.setProperty("class", "section-title")
-        header_layout.addWidget(title)
-        header_layout.addStretch()
         count = QLabel("")
         count.setProperty("class", "reset-credits-count")
         header_layout.addWidget(count)
+        header_layout.addStretch()
         self._reset_credits_count = count
+        self._reset_credits_header = header
         layout.addWidget(header)
 
-        empty = QLabel("No reset credits available")
+        empty = QLabel("No reset credits on this account")
         empty.setProperty("class", "empty-state reset-credits-empty")
         empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty.setVisible(False)
@@ -649,10 +757,6 @@ class CodexUsageWidget(BaseWidget):
             tokens_layout = QVBoxLayout(tokens)
             tokens_layout.setContentsMargins(0, 0, 0, 0)
             tokens_layout.setSpacing(0)
-            title = QLabel("Token totals")
-            title.setProperty("class", "section-title")
-            tokens_layout.addWidget(title)
-
             periods = QFrame()
             periods.setProperty("class", "periods")
             periods_layout = QGridLayout(periods)
@@ -660,7 +764,7 @@ class CodexUsageWidget(BaseWidget):
             periods_layout.setHorizontalSpacing(8)
             periods_layout.setVerticalSpacing(2)
             for column, (label, key) in enumerate(
-                (("TODAY", "today"), ("7 DAYS", "week"), ("30 DAYS", "month"), ("YEAR", "year"))
+                (("Today", "today"), ("7 days", "week"), ("30 days", "month"), ("Year", "year"))
             ):
                 name = QLabel(label)
                 name.setProperty("class", "period-name")
@@ -675,7 +779,7 @@ class CodexUsageWidget(BaseWidget):
             self._overview_tokens = tokens
             layout.addWidget(tokens)
 
-            empty = QLabel("Token history is unavailable")
+            empty = QLabel("No Codex sessions found on this machine")
             empty.setProperty("class", "empty-state")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty.setVisible(False)
@@ -830,7 +934,6 @@ class CodexUsageWidget(BaseWidget):
         layout.setVerticalSpacing(4)
 
         rows = (
-            ("Plan", "plan"),
             ("Credits", "credits"),
             ("Updated", "updated"),
             ("Status", "status"),
@@ -843,6 +946,7 @@ class CodexUsageWidget(BaseWidget):
             value.setProperty("class", f"value {key}")
             layout.addWidget(value, row, 1)
             self._detail_widgets[key] = value
+            self._detail_names[key] = name
 
         error = QLabel("")
         error.setProperty("class", "error")
@@ -1007,9 +1111,24 @@ class CodexUsageWidget(BaseWidget):
         header.setProperty("class", "header")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
+        app_icon = self._build_header_icon()
+        if app_icon is not None:
+            header_layout.addWidget(app_icon, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        title_stack = QFrame()
+        title_stack.setProperty("class", "title-stack")
+        title_stack_layout = QVBoxLayout(title_stack)
+        title_stack_layout.setContentsMargins(0, 0, 0, 0)
+        title_stack_layout.setSpacing(0)
         title = QLabel("Codex Usage")
         title.setProperty("class", "text")
-        header_layout.addWidget(title)
+        title_stack_layout.addWidget(title, 0, Qt.AlignmentFlag.AlignLeft)
+        plan_label = QLabel("")
+        plan_label.setProperty("class", "plan-line")
+        title_stack_layout.addWidget(plan_label, 0, Qt.AlignmentFlag.AlignLeft)
+        self._plan_label = plan_label
+        self._menu_title_label = title
+        header_layout.addWidget(title_stack)
         header_layout.addStretch()
         refresh_status = QLabel("")
         refresh_status.setProperty("class", "refresh-status")
@@ -1030,6 +1149,9 @@ class CodexUsageWidget(BaseWidget):
         layout.addWidget(self._build_section("secondary", "Secondary"))
         layout.addWidget(self._build_pager())
 
+        # Before the first measure: the indent it removes is part of each label's width.
+        align_label_text(self._menu)
+
     def _sync_reset_credits(self) -> None:
         if not is_valid_qobject(self._reset_credits_count):
             return
@@ -1040,6 +1162,9 @@ class CodexUsageWidget(BaseWidget):
         available_count = max(0, int(available_count)) if isinstance(available_count, (int, float)) else 0
         suffix = "credit" if available_count == 1 else "credits"
         self._reset_credits_count.setText(f"{available_count} {suffix}")
+        if is_valid_qobject(self._reset_credits_header):
+            # "0 credits" above "No reset credits on this account" states one fact twice.
+            self._reset_credits_header.setVisible(bool(available_count))
 
         credits = summary.get("credits")
         credit_items = [credit for credit in credits if isinstance(credit, dict)] if isinstance(credits, list) else []
@@ -1047,7 +1172,7 @@ class CodexUsageWidget(BaseWidget):
             if credits is None and available_count:
                 message = f"{available_count} reset {suffix} available; details unavailable"
             else:
-                message = "No reset credits available"
+                message = "No reset credits on this account"
             self._reset_credits_empty.setText(message)
             self._reset_credits_empty.setVisible(not credit_items)
 
@@ -1082,15 +1207,33 @@ class CodexUsageWidget(BaseWidget):
                 continue
             remaining = window.get("remaining")
             level = self._level_class(remaining)
-            duration = self._duration_name(window.get("duration_mins"), fallback)
-            widgets["title"].setText(duration)
-            widgets["progress"].set_value(self._percent_value(remaining), level)
-            widgets["used"].setText(f"{self._percent(window.get('used'))}% used")
-            widgets["remaining"].setText(f"{self._percent(remaining)}% remaining")
-            widgets["remaining"].setProperty("class", f"remaining {level}")
+            # The fill follows usage_mode so it can never contradict the number beside it:
+            # showing "4% used" against a nearly-full bar reads as two different facts.
+            # The colour still tracks health (how much is left), not the number's magnitude.
+            filled = window.get("used") if self._usage_mode == "used" else remaining
+            widgets["progress"].set_value(self._percent_value(filled), level)
+
+            if widgets.get("variant") == "ledger":
+                widgets["title"].setText(self._duration_name(window.get("duration_mins"), fallback))
+                widgets["percent"].setText(f"{self._mode_value(window)}%")
+                widgets["percent"].setProperty("class", f"percent {level}")
+                widgets["countdown"].setText(self._fmt_reset(window.get("resets_at")))
+                refresh_widget_style(widgets["percent"])
+                continue
+
+            widgets["value"].setText(f"{self._mode_value(window)}%")
+            widgets["value"].setProperty("class", f"hero-value {level}")
+            phrase = self._window_phrase(window.get("duration_mins"))
+            mode_word = (
+                self.config.mode_label_remaining if self._usage_mode == "remaining" else self.config.mode_label_used
+            )
+            widgets["caption"].setText(f"of your {phrase} window {mode_word}")
             widgets["reset"].setText(f"Resets in {self._fmt_reset(window.get('resets_at'))}")
             widgets["date"].setText(self._fmt_reset_at(window.get("resets_at")))
-            refresh_widget_style(widgets["remaining"])
+            refresh_widget_style(widgets["value"])
+            # Re-measured here, not at build time: the percentage's leading digit is what
+            # sets the rail, and it changes as the window fills.
+            align_label_ink(widgets["value"], widgets["caption"])
 
         tokens = self._data.get("tokens")
         has_tokens = self.config.show_token_usage and isinstance(tokens, dict)
@@ -1116,11 +1259,24 @@ class CodexUsageWidget(BaseWidget):
                 widgets["value"].setText(self._format_tokens(value))
                 widgets["bar"].set_ratio(float(value) / model_maximum if model_maximum else 0)
 
+        if is_valid_qobject(self._plan_label):
+            line = self._account_line()
+            self._plan_label.setText(line)
+            self._plan_label.setVisible(bool(line))
+            if line:
+                set_tooltip(self._plan_label, self._account_tooltip())
+                # The account line arrives with the data, so the rail is measured here
+                # rather than at build time, when this label is still empty.
+                align_label_ink(self._menu_title_label, self._plan_label)
+
         if self._detail_widgets:
             stale = bool(self._data.get("stale"))
-            self._detail_widgets["plan"].setText(str(self._data.get("plan") or "--"))
             credits = self._data.get("credits")
-            self._detail_widgets["credits"].setText(str(credits if credits is not None else "--"))
+            has_credits = credits is not None
+            self._detail_widgets["credits"].setText(str(credits) if has_credits else "")
+            self._detail_widgets["credits"].setVisible(has_credits)
+            if "credits" in self._detail_names:
+                self._detail_names["credits"].setVisible(has_credits)
             self._detail_widgets["updated"].setText(self._fmt_updated(self._data.get("fetched_at")))
             self._detail_widgets["status"].setText("Cached" if stale else "Live")
             self._detail_widgets["status"].setProperty("class", f"value status {'stale' if stale else 'live'}")

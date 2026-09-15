@@ -9,10 +9,14 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayou
 from core.utils.qobject import is_valid_qobject
 from core.utils.stat_popup import GraphWidget
 from core.utils.tooltip import set_tooltip
-from core.utils.utilities import PopupWidget, refresh_widget_style
+from core.utils.utilities import PopupWidget, align_label_ink, align_label_text, refresh_widget_style
 from core.validation.widgets.yasb.deepseek_usage import DeepSeekUsageConfig
 from core.widgets.base import BaseWidget
-from core.widgets.services.deepseek_usage.deepseek_api import DeepSeekUsageService, resolve_api_key
+from core.widgets.services.deepseek_usage.deepseek_api import (
+    DeepSeekUsageService,
+    fingerprint_api_key,
+    resolve_api_key,
+)
 from core.widgets.services.deepseek_usage.spend_history import (
     budget_percent,
     empty_ledger,
@@ -32,8 +36,8 @@ _CURRENCY_SYMBOLS: dict[str, str] = {"CNY": "¥", "USD": "$"}
 _ERROR_MESSAGES: dict[str, str] = {
     "no_key": "No API key - set YASB_DEEPSEEK_API_KEY",
     "auth": "API key rejected - check it on platform.deepseek.com",
-    "http": "DeepSeek returned an error - showing last known balance",
-    "network": "DeepSeek unreachable - showing last known balance",
+    "http": "DeepSeek is having trouble - showing the last cached balance",
+    "network": "DeepSeek is unreachable - showing the last cached balance",
 }
 _EMPTY_SUMMARY: dict[str, Any] = {"totals": {}, "series_by_period": {}, "currency": ""}
 
@@ -272,6 +276,9 @@ class DeepSeekUsageWidget(BaseWidget):
 
     def _tooltip_text(self, values: dict[str, str]) -> str:
         tip = f"DeepSeek balance - {values['balance']}"
+        account = self._account_line()
+        if account:
+            tip += f"\n{account}"
         if self.config.spend_history.enabled:
             tip += f"\nSpent today: {values['today_spend']} · this month: {values['month_spend']}"
         percent = self._budget_percent()
@@ -354,40 +361,94 @@ class DeepSeekUsageWidget(BaseWidget):
         self._sync_spend_section()
         self._sync_footer()
 
+    def _build_header_icon(self) -> QLabel | None:
+        """The product mark at the left of the header, when a path is configured.
+
+        Rendered as rich text rather than a QPixmap so the same <img> the bar label accepts
+        works here, and a missing file degrades to an empty label instead of raising.
+        """
+        path = (self.config.menu.icon or "").strip()
+        if not path:
+            return None
+        label = QLabel(f"<img src='{path}' width='22' height='22'>")
+        label.setProperty("class", "app-icon")
+        return label
+
+    def _account_line(self) -> str:
+        """Whose balance this is, as far as DeepSeek lets us know.
+
+        The Claude and Codex widgets read an e-mail from their providers. DeepSeek has no
+        such endpoint - ``/user/balance`` returns money and nothing else - so a configured
+        label wins, and failing that the key's own fingerprint at least distinguishes one
+        account from another. Empty when there is neither, so the caller drops the line
+        instead of rendering a placeholder.
+        """
+        if not self.config.show_account:
+            return ""
+        label = (self.config.account_label or "").strip()
+        if label:
+            return label
+        return fingerprint_api_key(resolve_api_key(self.config.api_key))
+
+    def _account_tooltip(self) -> str:
+        """Say where the identifier came from, since a fingerprint is not self-explanatory."""
+        label = (self.config.account_label or "").strip()
+        if label:
+            return label
+        fingerprint = fingerprint_api_key(resolve_api_key(self.config.api_key))
+        if not fingerprint:
+            return ""
+        return f"API key {fingerprint}\nDeepSeek's API reports no account name.\nSet menu account_label to name it yourself."
+
     def _build_balance_section(self) -> QFrame:
+        """The balance leads, the way the window percentage leads in the other two widgets.
+
+        A prepaid account has no quota and no reset, so the hero is money rather than a
+        percentage - but it is still the one number you open this panel to read. The chip that
+        used to label it is gone: the caption underneath says what it is, which keeps chips
+        meaning "section label" here as in the Claude and Codex popups.
+        """
         frame = QFrame()
-        frame.setProperty("class", "section balance")
+        frame.setProperty("class", "section balance hero")
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        title_label = QLabel("Balance")
-        title_label.setProperty("class", "title")
-        layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignLeft)
-
         total_label = QLabel("--")
-        total_label.setProperty("class", "balance-total")
-        layout.addWidget(total_label)
+        total_label.setProperty("class", "hero-value")
+        layout.addWidget(total_label, 0, Qt.AlignmentFlag.AlignLeft)
         self._balance_labels["total"] = total_label
 
+        caption = QLabel("available to spend")
+        caption.setProperty("class", "hero-caption")
+        layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
+        self._balance_labels["caption"] = caption
+
         if self.config.menu.show_breakdown:
-            for key, caption in (("topped_up", "Topped-up"), ("granted", "Granted")):
+            ledger = QFrame()
+            ledger.setProperty("class", "ledger")
+            ledger_layout = QVBoxLayout(ledger)
+            ledger_layout.setContentsMargins(0, 0, 0, 0)
+            ledger_layout.setSpacing(0)
+            for key, caption_text in (("topped_up", "Topped up"), ("granted", "Granted")):
                 row = QFrame()
                 row.setProperty("class", "row")
                 row_layout = QHBoxLayout(row)
                 row_layout.setContentsMargins(0, 0, 0, 0)
                 row_layout.setSpacing(0)
 
-                caption_label = QLabel(caption)
-                caption_label.setProperty("class", "caption")
+                caption_label = QLabel(caption_text)
+                caption_label.setProperty("class", "name")
                 row_layout.addWidget(caption_label)
                 row_layout.addStretch()
 
                 value_label = QLabel("--")
                 value_label.setProperty("class", "value")
+                value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 row_layout.addWidget(value_label)
                 self._balance_labels[key] = value_label
-                layout.addWidget(row)
+                ledger_layout.addWidget(row)
+            layout.addWidget(ledger)
 
         return frame
 
@@ -496,12 +557,15 @@ class DeepSeekUsageWidget(BaseWidget):
             total_label = self._balance_labels.get("total")
             if total_label is not None:
                 total_label.setText(self._fmt_money(self._data.get("total")))
-                total_label.setProperty("class", "balance-total low" if self._is_low() else "balance-total")
+                total_label.setProperty("class", "hero-value low" if self._is_low() else "hero-value")
                 refresh_widget_style(total_label)
             for key in ("topped_up", "granted"):
                 label = self._balance_labels.get(key)
                 if label is not None:
                     label.setText(self._fmt_money(self._data.get(key)))
+            # Re-measured here, not at build time: the figure's first glyph is what sets the
+            # rail, and it changes with the balance.
+            align_label_ink(total_label, self._balance_labels.get("caption"))
         except RuntimeError:
             # Popup was destroyed; references are stale until it reopens.
             self._balance_labels = {}
@@ -587,9 +651,32 @@ class DeepSeekUsageWidget(BaseWidget):
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(0)
 
+        app_icon = self._build_header_icon()
+        if app_icon is not None:
+            header_layout.addWidget(app_icon, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # Title and account stack, matching the Claude and Codex headers, so the panel
+        # answers "usage for whom" as well as "what" once it is pinned or detached.
+        title_stack = QFrame()
+        title_stack.setProperty("class", "title-stack")
+        title_layout = QVBoxLayout(title_stack)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(0)
+
         title_label = QLabel("DeepSeek Usage")
         title_label.setProperty("class", "text")
-        header_layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignLeft)
+        title_layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignLeft)
+
+        account_text = self._account_line()
+        if account_text:
+            account_label = QLabel(account_text)
+            account_label.setProperty("class", "account")
+            set_tooltip(account_label, self._account_tooltip())
+            title_layout.addWidget(account_label, 0, Qt.AlignmentFlag.AlignLeft)
+            # Title and account are fixed for the life of the popup, so one measure is enough.
+            align_label_ink(title_label, account_label)
+
+        header_layout.addWidget(title_stack)
         header_layout.addStretch()
 
         refresh_btn = QPushButton("\U000f0450")
@@ -625,6 +712,8 @@ class DeepSeekUsageWidget(BaseWidget):
         # sections, matching the Claude popup.
         layout.addStretch(1)
 
+        # Before the first measure: the indent it removes is part of each label's width.
+        align_label_text(self._menu)
         self._menu.adjustSize()
         # Lock the width after the first layout so switching periods only changes the height,
         # keeping the bars a constant length between periods.
