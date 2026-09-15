@@ -27,3 +27,4 @@ build_x64/
 .cache
 # IDE files
 compile_commands.json
+.claude/settings.local.json
