@@ -477,9 +477,7 @@ class CodexUsageWidget(BaseWidget):
             primary = self._window("primary")
             secondary = self._window("secondary")
             mode_key = "used" if self._usage_mode == "used" else "remaining"
-            mode_word = (
-                self.config.mode_label_used if self._usage_mode == "used" else self.config.mode_label_remaining
-            )
+            mode_word = self.config.mode_label_used if self._usage_mode == "used" else self.config.mode_label_remaining
 
             def window_line(window: dict[str, Any], fallback: str) -> str:
                 name = self._duration_name(window.get("duration_mins"), fallback)
