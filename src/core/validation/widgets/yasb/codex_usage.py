@@ -12,6 +12,10 @@ class CodexUsageCallbacksConfig(CallbacksConfig):
 
 
 class CodexUsageMenuConfig(CustomBaseModel):
+    # Path to an image shown at the left of the popup header. The mark already identifies
+    # the widget on the bar, so repeating it here lets a pinned or detached popup say what it
+    # belongs to on its own. Blank leaves the header as it was.
+    icon: str = ""
     blur: bool = True
     round_corners: bool = True
     round_corners_type: str = "normal"
@@ -50,6 +54,17 @@ class CodexUsageConfig(CustomBaseModel):
     cache_ttl: int = Field(default=120, ge=0, le=3600)
     timeout: float = Field(default=15.0, ge=1.0, le=60.0)
     tooltip: bool = True
+    # Whether {primary_value}/{secondary_value} (and the progress bar) report the share of
+    # the window still available or the share consumed. Flipped at runtime by the
+    # "toggle_usage_mode" callback. The explicit {*_used}/{*_remaining} placeholders ignore it.
+    usage_mode: Literal["used", "remaining"] = "remaining"
+    mode_label_used: str = "used"
+    mode_label_remaining: str = "left"
+    # Show which account the numbers belong to, beside the popup title and in the tooltip.
+    # Read over the app-server (account/read), never from ~/.codex/auth.json. Turn it off if
+    # you screenshot your bar, since it puts an email on screen - and the request is then
+    # not made at all.
+    show_account: bool = True
     show_token_usage: bool = True
     stale_icon: str = "⚠"
     progress_bar: CodexUsageProgressBarConfig = CodexUsageProgressBarConfig()
