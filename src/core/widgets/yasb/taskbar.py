@@ -4,8 +4,20 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, override
 
 from PIL import Image
-from PyQt6.QtCore import QEasingCurve, QEvent, QMimeData, QObject, QPoint, QPropertyAnimation, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QMimeData,
+    QObject,
+    QPoint,
+    QPropertyAnimation,
+    QRect,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
 from PyQt6.QtGui import (
+    QColor,
     QCursor,
     QDrag,
     QDragEnterEvent,
@@ -13,8 +25,11 @@ from PyQt6.QtGui import (
     QDragMoveEvent,
     QDropEvent,
     QEnterEvent,
+    QFont,
     QImage,
     QMouseEvent,
+    QPainter,
+    QPaintEvent,
     QPixmap,
     QShowEvent,
 )
@@ -42,6 +57,7 @@ from core.validation.widgets.yasb.taskbar import TaskbarConfig
 from core.widgets.base import BaseWidget
 from core.widgets.services.recycle_bin.recycle_bin_monitor import RecycleBinMonitor
 from core.widgets.services.taskbar.app_menu import show_context_menu
+from core.widgets.services.taskbar.overlay_monitor import TaskbarNotificationMonitor
 from core.widgets.services.taskbar.pin_manager import PinManager
 from core.widgets.services.taskbar.thumbnail import TaskbarThumbnailManager
 
@@ -60,6 +76,75 @@ class FlashTimer(QTimer):
         super().__init__(parent)
         self.count = 0
         self.container = container
+
+
+class BadgeLabel(QLabel):
+    """A QLabel subclass that paints a notification badge (dot or number) overlay on top of the icon."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._show_badge = False
+        self._badge_count = 0
+        self._badge_cfg = None  # will be set to BadgeConfig instance
+
+    def configure(self, badge_cfg) -> None:
+        """Attach a BadgeConfig instance so paintEvent knows how to render."""
+        self._badge_cfg = badge_cfg
+
+    def set_badge(self, show: bool, count: int = 0) -> None:
+        """Show or hide the badge, optionally with a count (for number mode)."""
+        self._show_badge = show
+        self._badge_count = count
+        self.update()
+
+    @override
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
+        super().paintEvent(a0)
+        if not self._show_badge or self._badge_cfg is None or not self._badge_cfg.enabled:
+            return
+
+        cfg = self._badge_cfg
+        size = cfg.size
+        half = size // 2
+        w, h = self.width(), self.height()
+        ox, oy = cfg.offset_x, cfg.offset_y
+
+        pos = cfg.position
+        if pos == "top-right":
+            cx, cy = w - half + ox, half + oy
+        elif pos == "top-left":
+            cx, cy = half + ox, half + oy
+        elif pos == "bottom-right":
+            cx, cy = w - half + ox, h - half + oy
+        else:  # bottom-left
+            cx, cy = half + ox, h - half + oy
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Draw border ring if requested
+        if cfg.border_width > 0 and cfg.border_color != "transparent":
+            border_r = half + cfg.border_width
+            painter.setBrush(QColor(cfg.border_color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPoint(cx, cy), border_r, border_r)
+
+        # Draw filled circle
+        painter.setBrush(QColor(cfg.color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPoint(cx, cy), half, half)
+
+        # Draw count text for "number" mode
+        if cfg.type == "number" and self._badge_count > 0:
+            text = str(self._badge_count) if self._badge_count <= 9 else "9+"
+            font = QFont()
+            font.setPixelSize(cfg.font_size)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(QColor("white"))
+            painter.drawText(QRect(cx - half, cy - half, size, size), Qt.AlignmentFlag.AlignCenter, text)
+
+        painter.end()
 
 
 class DraggableAppButton(QFrame):
@@ -535,6 +620,8 @@ class TaskbarWidget(BaseWidget):
         self._suspend_updates = False
         self._animating_widgets: dict[int, QPropertyAnimation] = {}
         self._flash_timers: dict[int, FlashTimer] = {}
+        self._notification_counts: dict[str, int] = {}  # {app_name_lower: count} from notification center
+        self._overlay_monitor: TaskbarNotificationMonitor | None = None
         self._recycle_bin_state = {"is_empty": True}
         self._pending_pinned_recreations: set[str] = set()  # Track pending placeholder recreations
         self._minimized_hwnds: set[int] = set()
@@ -588,6 +675,10 @@ class TaskbarWidget(BaseWidget):
 
         # Connect to global signal bus for inter-widget communication
         PinManager.get_signal_bus().pinned_apps_changed.connect(self._on_pinned_apps_changed_signal)
+
+        # Start notification badge monitor if badge feature is enabled
+        if self.config.badge.enabled:
+            self._start_overlay_monitor()
 
     def _load_pinned_apps(self) -> None:
         """Load pinned apps from disk using PinManager."""
@@ -831,7 +922,8 @@ class TaskbarWidget(BaseWidget):
 
         # Only create icon label if icon_size > 0
         if self.config.icon_size > 0:
-            icon_label = QLabel()
+            icon_label = BadgeLabel()
+            icon_label.configure(self.config.badge)
             icon_label.setProperty("class", "app-icon")
             try:
                 icon_label.setFixedSize(self.config.icon_size, self.config.icon_size)
@@ -1438,6 +1530,7 @@ class TaskbarWidget(BaseWidget):
                 icon = self._get_app_icon(hwnd)
                 self.window_buttons[hwnd] = (title, icon, hwnd, process)
                 self._sync_group_button(group_key)
+                self._update_badge_for_hwnd(hwnd)
                 return
             self.group_hwnds.pop(group_key, None)
 
@@ -1519,6 +1612,9 @@ class TaskbarWidget(BaseWidget):
             self.group_hwnds[group_key] = [hwnd]
             self.hwnd_to_group[hwnd] = group_key
 
+        # Apply initial badge state (may already have notifications before button was created)
+        self._update_badge_for_hwnd(hwnd)
+
         if is_pinned:
             container.setProperty("pinned", True)
             container.setProperty("unique_id", unique_id)
@@ -1567,6 +1663,7 @@ class TaskbarWidget(BaseWidget):
                 if is_valid_qobject(container):
                     self._update_flash_state(container.hwnd, container)
                     self._refresh_title_visibility(container.hwnd)
+                    self._update_badge_for_hwnd(container.hwnd)
                 return
             self.group_hwnds.pop(group_key, None)
 
@@ -1676,6 +1773,7 @@ class TaskbarWidget(BaseWidget):
                 if not self._context_menu_open:
                     self._refresh_title_visibility(widget.hwnd)
                 self._update_flash_state(widget.hwnd, widget)
+                self._update_badge_for_hwnd(widget.hwnd)
             except Exception:
                 pass
             return
@@ -1683,6 +1781,9 @@ class TaskbarWidget(BaseWidget):
         layout = widget.layout()
         if not layout:
             return
+
+        # Refresh badge: reconciles flash state + notification-center count
+        self._update_badge_for_hwnd(hwnd)
 
         # Update icon using helper method
         if icon:
@@ -1792,6 +1893,15 @@ class TaskbarWidget(BaseWidget):
 
     def _stop_events(self) -> None:
         """Stop the task manager and clean up"""
+        # Stop the notification badge monitor
+        if hasattr(self, "_overlay_monitor") and self._overlay_monitor:
+            try:
+                self._overlay_monitor.stop()
+                self._overlay_monitor.wait(2000)
+            except Exception:
+                pass
+            self._overlay_monitor = None
+
         # Clean up any running animations
         for hwnd, animation in list(self._animating_widgets.items()):
             try:
@@ -1982,7 +2092,8 @@ class TaskbarWidget(BaseWidget):
 
         # Only create icon label if icon_size > 0
         if self.config.icon_size > 0:
-            icon_label = QLabel()
+            icon_label = BadgeLabel()
+            icon_label.configure(self.config.badge)
             icon_label.setProperty("class", "app-icon")
             try:
                 icon_label.setFixedSize(self.config.icon_size, self.config.icon_size)
@@ -2043,6 +2154,95 @@ class TaskbarWidget(BaseWidget):
             set_tooltip(container, title, delay=0)
 
         return container
+
+    def _set_badge_count(self, hwnd: int, count: int) -> None:
+        """External entry point: set a badge count directly on a specific HWND button.
+
+        For internal badge updates driven by the notification monitor or flash events,
+        prefer calling ``_update_badge_for_hwnd`` which reconciles both triggers.
+        """
+        if not self.config.badge.enabled:
+            return
+        widget = self.hwnd_to_widget.get(hwnd)
+        if not widget:
+            return
+        icon_label = self._get_icon_label(widget)
+        if isinstance(icon_label, BadgeLabel):
+            icon_label.set_badge(count > 0, count=count)
+
+    # ------------------------------------------------------------------
+    # Notification badge subsystem
+    # ------------------------------------------------------------------
+
+    def _start_overlay_monitor(self) -> None:
+        """Start the background notification-center polling thread."""
+        try:
+            self._overlay_monitor = TaskbarNotificationMonitor(poll_interval=2.0)
+            self._overlay_monitor.counts_updated.connect(self._on_overlay_counts_updated)
+            self._overlay_monitor.start()
+        except Exception as exc:
+            logging.warning("TaskbarWidget: failed to start overlay monitor: %s", exc)
+            self._overlay_monitor = None
+
+    def _on_overlay_counts_updated(self, counts: dict) -> None:
+        """Slot called when the notification monitor emits a new snapshot.
+
+        ``counts`` is ``{app_display_name_lower: unread_count}``.
+        """
+        self._notification_counts = counts
+        # Refresh the badge for every tracked window
+        for hwnd in list(self.hwnd_to_widget.keys()):
+            self._update_badge_for_hwnd(hwnd)
+
+    def _get_notification_count_for_hwnd(self, hwnd: int) -> int:
+        """Return the notification count for the app owning *hwnd*, or 0 if none."""
+        if not self._notification_counts:
+            return 0
+        app_window = self.task_manager.get_window(hwnd) if self.task_manager else None
+        process_name = app_window.process_name if app_window is not None else None
+        if process_name is None:
+            return 0
+        try:
+            # Primary key: process name without extension, e.g. "WhatsApp.exe" → "whatsapp"
+            key = process_name.lower().replace(".exe", "").strip()
+            count = self._notification_counts.get(key, 0)
+            if count > 0:
+                return count
+            # Fuzzy fallback: notification app name is a substring of process key (or vice-versa)
+            for app_name, c in self._notification_counts.items():
+                if app_name and (app_name in key or key in app_name):
+                    return c
+        except Exception:
+            pass
+        return 0
+
+    def _update_badge_for_hwnd(self, hwnd: int) -> None:
+        """Central badge update: reconcile flash state + notification count for *hwnd*.
+
+        For a grouped button the badge is aggregated over every window it holds. The windows
+        share one app, so the notification count is taken once rather than summed.
+        """
+        if not self.config.badge.enabled:
+            return
+        widget = self.hwnd_to_widget.get(hwnd)
+        if not widget:
+            return
+        icon_label = self._get_icon_label(widget)
+        if not isinstance(icon_label, BadgeLabel):
+            return
+
+        members = self.group_hwnds.get(self.hwnd_to_group.get(hwnd, "")) or [hwnd]
+        # The same test _update_flash_state blinks the button on: the manager's is_flashing,
+        # aggregated over the button's windows
+        is_flashing = "flashing" in self.get_container_class(hwnd)
+        notif_count = max(self._get_notification_count_for_hwnd(m) for m in members)
+
+        if is_flashing or notif_count > 0:
+            # In "number" mode show actual count (or 1 when only flashing without notifications)
+            display_count = notif_count if notif_count > 0 else 1
+            icon_label.set_badge(True, count=display_count)
+        else:
+            icon_label.set_badge(False)
 
     def get_container_class(self, hwnd: int) -> str:
         """Get CSS class for the app container based on window active, flashing and minimized status.
@@ -2284,7 +2484,7 @@ class TaskbarWidget(BaseWidget):
         except Exception:
             pass
 
-    def _get_icon_label(self, container: QWidget) -> QLabel | None:
+    def _get_icon_label(self, container: QWidget) -> BadgeLabel | QLabel | None:
         """Get the icon label widget from a container, navigating through the content_wrapper structure."""
         try:
             if not container:
