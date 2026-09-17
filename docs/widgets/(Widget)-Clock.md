@@ -95,7 +95,7 @@ clock:
   - **country_code:** The country code for holidays (e.g., "US", "AR").
   - **subdivision:** The subdivision code for holidays (e.g., "CA" for California, "Z" for Buenos Aires).
   - **show_holidays:** Whether to show holidays in the calendar.
-  - **holiday_color:** The color used to highlight holidays in the calendar (hex format, e.g., "#00A300").
+  - **holiday_color:** The color used to highlight holidays in the calendar (hex format, e.g., "#00A300"). A `-qproperty-restcolor` on `.calendar-grid` in the stylesheet takes precedence.
   - **show_week_numbers:** Whether to show week numbers in the calendar.
   - **show_years:** Whether to show the year label in the calendar popup.
   - **extended:** Show extended calendar with alarm/timer controls and upcoming holidays.
@@ -133,15 +133,38 @@ Clock format https://docs.python.org/3/library/time.html#time.strftime
 .clock-popup.calendar .calendar-table {}
 .clock-popup.calendar .calendar-table::item {}
 .clock-popup.calendar .calendar-table::item:selected {}
+/* Date panel (selected date) */
+.clock-popup.calendar .date-panel {}
 .clock-popup.calendar .day-label {}
-.clock-popup.calendar .year-label {}
-.clock-popup.calendar .month-label {}
 .clock-popup.calendar .date-label {}
-.clock-popup.calendar .week-label {}
+.clock-popup.calendar .month-label {}
+.clock-popup.calendar .year-label {}
 .clock-popup.calendar .holiday-label {}
+.clock-popup.calendar .week-label {}
+.clock-popup.calendar .week-total {}
+.clock-popup.calendar .week-progress {}
+.clock-popup.calendar .week-progress::chunk {}
+/* Month panel */
+.clock-popup.calendar .month-panel {}
+.clock-popup.calendar .month-title {}
+.clock-popup.calendar .button.today {}
+.clock-popup.calendar .button.nav {}
+.clock-popup.calendar .button.nav.prev {}
+.clock-popup.calendar .button.nav.next {}
+/* The grid paints its own cells; style them with qproperties:
+   -qproperty-textcolor, -qproperty-mutedcolor, -qproperty-restcolor (Sundays and holidays),
+   -qproperty-headercolor, -qproperty-accentcolor (today ring, selected fill),
+   -qproperty-accenttextcolor, -qproperty-hovercolor, -qproperty-cellradius,
+   -qproperty-ringwidth, -qproperty-restsunday (true/false) */
+.clock-popup.calendar .calendar-grid {}
+/* Agenda panel (extended: true) */
 .clock-popup.calendar .extended-container {}
-.clock-popup.calendar .upcoming-events-item {}
 .clock-popup.calendar .upcoming-events-header {}
+.clock-popup.calendar .upcoming-event {}
+.clock-popup.calendar .upcoming-event-name {}
+.clock-popup.calendar .upcoming-event-countdown {}
+.clock-popup.calendar .upcoming-event-date {}
+.clock-popup.calendar .upcoming-events-empty {}
 
 /* Alarm/Timer dialog styles */
 .clock-popup {}
