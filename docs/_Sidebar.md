@@ -11,6 +11,7 @@
 - [UI Components](./UI-Components)
 - Widgets:
     - [Active Windows Title](./(Widget)-Active-Windows-Title)
+    - [Anime Airing](./(Widget)-Anime-Airing)
     - [Applications](./(Widget)-Applications)
     - [Audio Visualizer](./(Widget)-Audio-Visualizer)
     - [Battery](./(Widget)-Battery)
