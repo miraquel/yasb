@@ -1,8 +1,8 @@
 import re
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QDesktopServices, QPixmap
+from PyQt6.QtCore import QEvent, Qt, QUrl
+from PyQt6.QtGui import QDesktopServices, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from core.utils.tooltip import set_tooltip
@@ -23,8 +23,9 @@ from core.widgets.services.anime_airing.service import AnimeAiringService, Remin
 # An episode this close is "soon": the label gains a class a theme can pick up.
 _SOON_SECONDS = 3600
 
-_HERO_COVER = (60, 86)
-_ROW_COVER = (30, 43)
+# (width, height, corner radius) in logical pixels, close to AniList's 0.7 cover aspect.
+_HERO_COVER = (60, 86, 4)
+_ROW_COVER = (30, 43, 3)
 
 _ERROR_TEXT = {
     "config": "Set username",
@@ -47,6 +48,56 @@ class _LinkFrame(QFrame):
         if event.button() == Qt.MouseButton.LeftButton and self.url:
             QDesktopServices.openUrl(QUrl(self.url))
         super().mousePressEvent(event)
+
+
+class _CoverLabel(QLabel):
+    """Cover art drawn at the screen's pixel density, centre-cropped, with rounded corners.
+
+    A stylesheet border-radius does not clip a pixmap, so the corners are painted in. The
+    popup is built before it has a screen, so the density is only known once it is shown:
+    the cover is redrawn then, and again if the popup lands on a screen with another scale.
+    """
+
+    def __init__(self, path: str | None, size: tuple[int, int, int]):
+        super().__init__()
+        self._path = path
+        self._width, self._height, self._radius = size
+        self._dpr = 0.0
+        self.setFixedSize(self._width, self._height)
+        self._render()
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() in (QEvent.Type.Show, QEvent.Type.DevicePixelRatioChange):
+            self._render()
+        return super().event(event)
+
+    def _render(self) -> None:
+        dpr = self.devicePixelRatioF()
+        if not self._path or dpr == self._dpr:
+            return
+        source = QPixmap(self._path)
+        if source.isNull():
+            return
+        self._dpr = dpr
+        width, height = max(1, round(self._width * dpr)), max(1, round(self._height * dpr))
+        scaled = source.scaled(
+            width,
+            height,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        cropped = scaled.copy((scaled.width() - width) // 2, (scaled.height() - height) // 2, width, height)
+        result = QPixmap(width, height)
+        result.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(result)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        clip = QPainterPath()
+        clip.addRoundedRect(0, 0, width, height, self._radius * dpr, self._radius * dpr)
+        painter.setClipPath(clip)
+        painter.drawPixmap(0, 0, cropped)
+        painter.end()
+        result.setDevicePixelRatio(dpr)
+        self.setPixmap(result)
 
 
 def _label(cls: str, text: str = "", kind: type[QLabel] = QLabel) -> QLabel:
@@ -372,23 +423,12 @@ class AnimeAiringWidget(BaseWidget):
             header_layout.addWidget(user, alignment=Qt.AlignmentFlag.AlignVCenter)
         return header
 
-    def _cover(self, show: Show, size: tuple[int, int], cls: str) -> QLabel | None:
+    def _cover(self, show: Show, size: tuple[int, int, int], cls: str) -> QLabel | None:
         if not self.config.menu.show_covers:
             return None
-        label = _label(cls)
-        label.setFixedSize(*size)
         path = cover_path(show.anilist_id, show.cover_url) if show.cover_url else None
-        if path is not None and path.exists():
-            pixmap = QPixmap(str(path))
-            if not pixmap.isNull():
-                label.setPixmap(
-                    pixmap.scaled(
-                        size[0],
-                        size[1],
-                        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                )
+        label = _CoverLabel(str(path) if path is not None and path.exists() else None, size)
+        label.setProperty("class", cls)
         return label
 
     def _build_hero(self, show: Show) -> QFrame:

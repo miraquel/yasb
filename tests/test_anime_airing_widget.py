@@ -166,6 +166,32 @@ class PopupTests(WidgetTestCase):
         self.assertEqual(by_class(host, "hero-meta")[0].text(), "Episode 19 · Wed 20:00")
 
 
+class CoverTests(unittest.TestCase):
+    def test_cover_is_drawn_at_screen_density_with_rounded_corners(self):
+        from PyQt6.QtGui import QColor, QPixmap
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "cover.png")
+            source = QPixmap(100, 142)
+            source.fill(QColor("#c03030"))
+            source.save(path)
+            label = widget_module._CoverLabel(path, (30, 43, 3))
+            pixmap = label.pixmap()
+            dpr = label.devicePixelRatioF()
+            self.assertEqual((pixmap.width(), pixmap.height()), (round(30 * dpr), round(43 * dpr)))
+            self.assertEqual(pixmap.devicePixelRatio(), dpr)
+            image = pixmap.toImage()
+            self.assertEqual(image.pixelColor(0, 0).alpha(), 0)
+            self.assertEqual(image.pixelColor(pixmap.width() // 2, pixmap.height() // 2).name(), "#c03030")
+            label.deleteLater()
+
+    def test_missing_cover_leaves_an_empty_slot(self):
+        label = widget_module._CoverLabel(None, (30, 43, 3))
+        self.assertTrue(label.pixmap().isNull())
+        self.assertEqual((label.width(), label.height()), (30, 43))
+        label.deleteLater()
+
+
 class ServiceReminderTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
