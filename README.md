@@ -126,6 +126,7 @@ choco install yasb
 | [Taskbar](https://github.com/amnweb/yasb/wiki/(Widget)-Taskbar) | A customizable taskbar for launching applications. |
 | [Pomodoro](https://github.com/amnweb/yasb/wiki/(Widget)-Pomodoro) | A Pomodoro timer widget. |
 | [Power Menu](https://github.com/amnweb/yasb/wiki/(Widget)-Power-Menu) | A menu for power options. |
+| [Prayer Times](https://github.com/amnweb/yasb/wiki/(Widget)-Prayer-Times) | Displays Islamic prayer times from the Aladhan API, with a countdown to the next prayer. |
 | [Quick Launch](https://github.com/amnweb/yasb/wiki/(Widget)-Quick-Launch) | A powerful and customizable quick launcher widget, supporting many different plugins. |
 | [Recycle Bin](https://github.com/amnweb/yasb/wiki/(Widget)-Recycle-Bin) | Shows the status of the recycle bin. |
 | [Update Checker](https://github.com/amnweb/yasb/wiki/(Widget)-Update-Check) | Checks for available updates using Windows Update and Winget. |
