@@ -49,6 +49,7 @@
     - [Notifications](./(Widget)-Notifications)
     - [OBS](./(Widget)-Obs)
     - [Open Meteo](./(Widget)-Open-Meteo)
+    - [Outlook Calendar](./(Widget)-Outlook-Calendar)
     - [Pomodoro](./(Widget)-Pomodoro)
     - [Power Menu](./(Widget)-Power-Menu)
     - [Power Plan](./(Widget)-Power-Plan)
