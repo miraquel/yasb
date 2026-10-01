@@ -4,7 +4,7 @@ Shows the current time in whatever format you like. You can cycle through differ
 
 | Option              | Type    | Default                                                                               | Description                                                                                                         |
 | ------------------- | ------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `label`             | string  | `'\uf017 {%H:%M:%S}'`                                                                 | The format string for the clock. You can use placeholders like `{%H:%M:%S}`, `{icon}`, or `{alarm}` to dynamically insert time information. |
+| `label`             | string  | `'\uf017 {%H:%M:%S}'`                                                                 | The format string for the clock. You can use placeholders like `{%H:%M:%S}`, `{icon}`, `{alarm}`, `{holiday}` or `{holiday_countdown}` to dynamically insert time information. |
 | `label_alt`         | string  | `'\uf017 {%d-%m-%y %H:%M:%S}'`                                                        | The alternative format string for the clock. Useful for displaying additional time details.                         |
 | `class_name`        | string  | `""`                                                                                  | Additional CSS class name for the widget.                                    |
 | `tooltip`           | boolean | `true`                                                                                | Whether to show the tooltip on hover.                                                                               |
@@ -69,6 +69,7 @@ calendar:
   subdivision: null
   show_holidays: false
   holiday_color: "#FF6464"
+  show_next_holiday: false
   show_week_numbers: false
   show_years: false
   extended: false
@@ -120,6 +121,7 @@ clock:
       show_years: true
       country_code: "AR"
       holiday_color: "#FF6464"
+      show_next_holiday: false
       extended: false
     callbacks:
       on_left: "toggle_calendar"
@@ -129,7 +131,7 @@ clock:
 
 ## Description of Options
 
-- **label:** The format string for the clock. You can use placeholders like `{%H:%M:%S}`, `{icon}`, or `{alarm}` to dynamically insert time information and icons.
+- **label:** The format string for the clock. You can use placeholders like `{%H:%M:%S}`, `{icon}`, or `{alarm}` to dynamically insert time information and icons, and `{holiday}` / `{holiday_countdown}` for the next public holiday (see [Holiday countdown](#holiday-countdown)).
 - **label_alt:** The alternative format string for the clock. Useful for displaying additional time details.
 - **class_name:** Additional CSS class name for the widget. This can be used to apply custom styles.
 - **locale:** The locale to use for the clock. If not specified, it defaults to an empty string.
@@ -154,6 +156,7 @@ clock:
   - **subdivision:** The subdivision code for holidays (e.g., "CA" for California, "Z" for Buenos Aires).
   - **show_holidays:** Whether to show holidays in the calendar.
   - **holiday_color:** The color used to highlight holidays in the calendar (hex format, e.g., "#00A300").
+  - **show_next_holiday:** Show the nearest public holiday under the date panel, with a countdown that keeps running while the popup is open.
   - **show_week_numbers:** Whether to show week numbers in the calendar.
   - **show_years:** Whether to show the year label in the calendar popup.
   - **extended:** Show extended calendar with alarm/timer controls and upcoming holidays.
@@ -166,6 +169,24 @@ Clock format https://docs.python.org/3/library/time.html#time.strftime
 - `country_code` specifies the country for which holidays are shown (e.g., "US" for United States, "AR" for Argentina). If you do not specify a country code, YASB will try to use the default country code based on your system settings.
 - `subdivision` allows you to select a specific region or state within the country (e.g., "CA" for California, "Z" for Buenos Aires).
 - For a full list of supported country codes and subdivisions, see the [holidays available countries documentation](https://github.com/vacanza/holidays?tab=readme-ov-file#available-countries).
+
+## Holiday countdown
+
+The clock can count down to the nearest public holiday for `country_code` (and `subdivision`), in the bar, in the calendar popup, or both. Neither needs `show_holidays`.
+
+- `{holiday}` is the holiday's name, cut to 20 characters (`Isra Mikraj Nabi...`).
+- `{holiday_countdown}` counts to midnight starting the holiday, in the clock's timezone: `85d` while it is a week or more away, then `2d 14h`, then `14h 32m` (or `45m`), and `Today` on the day.
+
+Put them in a `<span>` to give them their own label: it takes the span's class and hides itself when no holiday can be found (no country, or an unsupported one).
+
+```yaml
+label: "{%a %d %b %H:%M}<span class=\"holiday\">{holiday} {holiday_countdown}</span>"
+calendar:
+  country_code: "ID"
+  show_next_holiday: true
+```
+
+This shows `Thu 01 Oct 09:18` and `Hari Raya Natal 85d` in the bar. With `show_next_holiday`, the calendar's date panel ends with a *Next holiday* block: the full name and `Fri 25 Dec · in 85 days`.
 
 ## Example Style
 
@@ -184,6 +205,8 @@ Clock format https://docs.python.org/3/library/time.html#time.strftime
 .clock-widget .label.alarm.snooze {}
 .clock-widget .icon.alarm {}
 .clock-widget .icon.alarm.snooze {}
+/* A <span class="holiday"> holding {holiday} / {holiday_countdown} */
+.clock-widget .holiday {}
 
 /* All popup window in this widget share the .clock-popup base class */
 /* Calendar popup styles */
@@ -198,6 +221,10 @@ Clock format https://docs.python.org/3/library/time.html#time.strftime
 .clock-popup.calendar .date-label {}
 .clock-popup.calendar .week-label {}
 .clock-popup.calendar .holiday-label {}
+.clock-popup.calendar .next-holiday {}
+.clock-popup.calendar .next-holiday-header {}
+.clock-popup.calendar .next-holiday-name {}
+.clock-popup.calendar .next-holiday-date {}
 .clock-popup.calendar .extended-container {}
 .clock-popup.calendar .upcoming-events-item {}
 .clock-popup.calendar .upcoming-events-header {}
