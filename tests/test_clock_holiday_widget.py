@@ -143,22 +143,61 @@ class PopupBlockTests(HolidayTestCase):
         self.widget = make_widget("{%H:%M}", show_next_holiday=True)
         self.widget.show_calendar()
         popup = self.widget._yasb_calendar
-        self.assertEqual(by_class(popup, "next-holiday-header").text(), "Next holiday")
+        self.assertEqual(by_class(popup, "next-holiday-countdown").text(), "85 days until")
         self.assertEqual(by_class(popup, "next-holiday-name").text(), "Hari Raya Natal")
-        self.assertEqual(by_class(popup, "next-holiday-date").text(), "Fri 25 Dec · in 85 days")
+        self.assertEqual(by_class(popup, "next-holiday-date").text(), "Friday 25 December")
+
+    def test_block_has_no_label_above_it(self) -> None:
+        self.widget = make_widget("{%H:%M}", show_next_holiday=True)
+        self.widget.show_calendar()
+        with self.assertRaises(AssertionError):
+            by_class(self.widget._yasb_calendar, "next-holiday-header")
 
     def test_open_popup_keeps_counting(self) -> None:
         self.widget = make_widget("{%H:%M}", show_next_holiday=True)
         self.widget.show_calendar()
         FROZEN["now"] = datetime(2026, 12, 24, 9, 28, tzinfo=JAKARTA)
         self.widget.update_label()
-        self.assertEqual(by_class(self.widget._yasb_calendar, "next-holiday-date").text(), "Fri 25 Dec · in 14h 32m")
+        self.assertEqual(by_class(self.widget._yasb_calendar, "next-holiday-countdown").text(), "14h 32m until")
 
     def test_on_the_day_it_reads_today(self) -> None:
         FROZEN["now"] = datetime(2026, 12, 25, 8, 0, tzinfo=JAKARTA)
         self.widget = make_widget("{%H:%M}", show_next_holiday=True)
         self.widget.show_calendar()
-        self.assertEqual(by_class(self.widget._yasb_calendar, "next-holiday-date").text(), "Fri 25 Dec · Today")
+        popup = self.widget._yasb_calendar
+        self.assertEqual(by_class(popup, "next-holiday-countdown").text(), "Today")
+        self.assertEqual(by_class(popup, "next-holiday-name").text(), "Hari Raya Natal")
+        self.assertEqual(by_class(popup, "next-holiday-date").text(), "Friday 25 December")
+
+    def test_on_a_holiday_the_block_looks_past_the_one_the_heading_names(self) -> None:
+        # show_holidays already puts "Hari Raya Natal" under the date, so the block moves on.
+        FROZEN["now"] = datetime(2026, 12, 25, 8, 0, tzinfo=JAKARTA)
+        self.widget = make_widget("{%H:%M}", show_next_holiday=True, show_holidays=True)
+        self.widget.show_calendar()
+        popup = self.widget._yasb_calendar
+        self.assertEqual(by_class(popup, "holiday-label").text(), "Hari Raya Natal")
+        self.assertEqual(by_class(popup, "next-holiday-countdown").text(), "6d 16h until")
+        self.assertEqual(by_class(popup, "next-holiday-name").text(), "Tahun Baru Masehi")
+        self.assertEqual(by_class(popup, "next-holiday-date").text(), "Friday 1 January")
+
+    def test_the_bar_still_says_today(self) -> None:
+        FROZEN["now"] = datetime(2026, 12, 25, 8, 0, tzinfo=JAKARTA)
+        self.widget = make_widget(
+            '{%H:%M}<span class="holiday">{holiday} {holiday_countdown}</span>',
+            show_next_holiday=True,
+            show_holidays=True,
+        )
+        self.widget.show_calendar()
+        self.widget.update_label()
+        self.assertEqual(self.widget._widgets[1].text(), "Hari Raya Natal Today")
+
+    def test_grid_and_date_panel_hang_from_the_top(self) -> None:
+        self.widget = make_widget("{%H:%M}", show_next_holiday=True)
+        self.widget.show_calendar()
+        layout = self.widget._yasb_calendar.layout()
+        grid = layout.itemAt(layout.indexOf(self.widget.calendar))
+        self.assertTrue(grid.alignment() & Qt.AlignmentFlag.AlignTop)
+        self.assertTrue(layout.itemAt(0).layout().alignment() & Qt.AlignmentFlag.AlignTop)
 
     def test_a_deleted_popup_does_not_break_the_tick(self) -> None:
         self.widget = make_widget("{%H:%M}", show_next_holiday=True)

@@ -55,7 +55,7 @@ class FormatCountdownTests(unittest.TestCase):
     def test_far_off_counts_calendar_days(self) -> None:
         now = self.at(2026, 10, 1, 9, 18)
         self.assertEqual(format_countdown(now, self.CHRISTMAS), "85d")
-        self.assertEqual(format_countdown(now, self.CHRISTMAS, long=True), "in 85 days")
+        self.assertEqual(format_countdown(now, self.CHRISTMAS, long=True), "85 days")
 
     def test_seven_days_out_still_counts_days(self) -> None:
         self.assertEqual(format_countdown(self.at(2026, 12, 18, 0, 0), self.CHRISTMAS), "7d")
@@ -63,12 +63,12 @@ class FormatCountdownTests(unittest.TestCase):
     def test_within_a_week_shows_days_and_hours(self) -> None:
         now = self.at(2026, 12, 22, 9, 30)
         self.assertEqual(format_countdown(now, self.CHRISTMAS), "2d 14h")
-        self.assertEqual(format_countdown(now, self.CHRISTMAS, long=True), "in 2d 14h")
+        self.assertEqual(format_countdown(now, self.CHRISTMAS, long=True), "2d 14h")
 
     def test_under_a_day_shows_hours_and_minutes(self) -> None:
         now = self.at(2026, 12, 24, 9, 28)
         self.assertEqual(format_countdown(now, self.CHRISTMAS), "14h 32m")
-        self.assertEqual(format_countdown(now, self.CHRISTMAS, long=True), "in 14h 32m")
+        self.assertEqual(format_countdown(now, self.CHRISTMAS, long=True), "14h 32m")
 
     def test_under_an_hour_shows_minutes_only(self) -> None:
         self.assertEqual(format_countdown(self.at(2026, 12, 24, 23, 15), self.CHRISTMAS), "45m")
