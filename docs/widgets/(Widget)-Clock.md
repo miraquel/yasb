@@ -69,6 +69,7 @@ calendar:
   subdivision: null
   show_holidays: false
   holiday_color: "#FF6464"
+  rest_days: []
   show_next_holiday: false
   show_week_numbers: false
   show_years: false
@@ -121,6 +122,7 @@ clock:
       show_years: true
       country_code: "AR"
       holiday_color: "#FF6464"
+      rest_days: []
       show_next_holiday: false
       extended: false
     callbacks:
@@ -156,6 +158,7 @@ clock:
   - **subdivision:** The subdivision code for holidays (e.g., "CA" for California, "Z" for Buenos Aires).
   - **show_holidays:** Whether to show holidays in the calendar.
   - **holiday_color:** The color used to highlight holidays in the calendar (hex format, e.g., "#00A300").
+  - **rest_days:** Weekdays painted like holidays in the month grid, header included, e.g. `["sunday"]` for an Indonesian-style calendar where Sundays are red. Defaults to none.
   - **show_next_holiday:** Show the nearest public holiday under the date panel, with a countdown that keeps running while the popup is open.
   - **show_week_numbers:** Whether to show week numbers in the calendar.
   - **show_years:** Whether to show the year label in the calendar popup.
@@ -186,7 +189,41 @@ calendar:
   show_next_holiday: true
 ```
 
-This shows `Thu 01 Oct 09:18` and `Hari Raya Natal 85d` in the bar. With `show_next_holiday`, the calendar's date panel ends with a *Next holiday* block: the full name and `Fri 25 Dec · in 85 days`.
+This shows `Thu 01 Oct 09:18` and `Hari Raya Natal 85d` in the bar. With `show_next_holiday`, the calendar's date panel ends with three lines: how long (`85 days until`), the holiday's full name, and its date (`Friday 25 December`). The first line keeps counting while the popup is open. On the holiday itself it reads `Today`; with `show_holidays` on, the holiday label under the date already names today's holiday, so the block moves on to the one after it.
+
+## Calendar grid
+
+The month grid paints its own dates. Rest days (`rest_days`) and public holidays (`show_holidays`) take the rest colour, dates from the neighbouring months are muted, and today is circled. Colours come from qproperties on `.calendar-grid`; any you leave out fall back as listed:
+
+| qproperty | Paints | Fallback |
+| --- | --- | --- |
+| `qproperty-textcolor` | dates | the `.calendar-table` `color` |
+| `qproperty-mutedcolor` | dates from the neighbouring months | the date colour at 35% |
+| `qproperty-restcolor` | rest days, holidays and their weekday names | `holiday_color` |
+| `qproperty-ringcolor` | the ring around today | the date colour |
+| `qproperty-selectcolor` | a disc behind the selected date | none: `::item:selected` styles the selection |
+
+Setting `selectcolor` hands the selection to the grid: the selected date gets the disc, and the accent bar Windows 11 draws beside a selected cell goes away. Without it, the selected date keeps whatever `::item:selected` gives it.
+
+Don't put `color` on `::item` for a red weekday header: it paints over the header's rest colour. Set the header colour as `color` on `.calendar-table` instead.
+
+```css
+.clock-popup.calendar .calendar-table {
+    font-family: 'Bahnschrift';
+    color: rgba(236, 234, 228, 0.54); /* weekday header */
+}
+.clock-popup.calendar .calendar-table::item,
+.clock-popup.calendar .calendar-table::item:selected {
+    background-color: transparent;
+}
+.clock-popup.calendar .calendar-grid {
+    qproperty-textcolor: #eceae4;
+    qproperty-mutedcolor: rgba(236, 234, 228, 0.22);
+    qproperty-restcolor: #ee5d5a;
+    qproperty-ringcolor: #eceae4;
+    qproperty-selectcolor: rgba(236, 234, 228, 0.1);
+}
+```
 
 ## Example Style
 
@@ -211,10 +248,14 @@ This shows `Thu 01 Oct 09:18` and `Hari Raya Natal 85d` in the bar. With `show_n
 /* All popup window in this widget share the .clock-popup base class */
 /* Calendar popup styles */
 .clock-popup.calendar {}
+/* Holds the popup's content; pad the popup here (.clock-popup.calendar itself ignores padding) */
+.clock-popup.calendar .calendar-container {}
 .clock-popup.calendar .calendar-layout {}
 .clock-popup.calendar .calendar-table {}
 .clock-popup.calendar .calendar-table::item {}
 .clock-popup.calendar .calendar-table::item:selected {}
+/* The month grid; colours via qproperties, see Calendar grid */
+.clock-popup.calendar .calendar-grid {}
 .clock-popup.calendar .day-label {}
 .clock-popup.calendar .year-label {}
 .clock-popup.calendar .month-label {}
@@ -222,7 +263,7 @@ This shows `Thu 01 Oct 09:18` and `Hari Raya Natal 85d` in the bar. With `show_n
 .clock-popup.calendar .week-label {}
 .clock-popup.calendar .holiday-label {}
 .clock-popup.calendar .next-holiday {}
-.clock-popup.calendar .next-holiday-header {}
+.clock-popup.calendar .next-holiday-countdown {}
 .clock-popup.calendar .next-holiday-name {}
 .clock-popup.calendar .next-holiday-date {}
 .clock-popup.calendar .extended-container {}

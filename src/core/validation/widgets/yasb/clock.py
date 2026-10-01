@@ -1,5 +1,5 @@
 import re
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, RootModel
 
@@ -23,6 +23,7 @@ class ClockCalendarConfig(CustomBaseModel):
     subdivision: str | None = None
     show_holidays: bool = False
     holiday_color: str = "#FF6464"
+    rest_days: list[Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]] = []
     show_next_holiday: bool = False
     show_week_numbers: bool = False
     show_years: bool = False
