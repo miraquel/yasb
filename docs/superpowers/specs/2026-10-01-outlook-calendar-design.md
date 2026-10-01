@@ -125,7 +125,9 @@ class Snapshot:
 
 1. **Ongoing** (`start <= now < end`): the one that ends first. Countdown `now`.
 2. Otherwise **next** (`start > now`): the earliest start.
-3. Otherwise none → `label_empty`.
+3. Otherwise none: the first text label shows `empty_text` (or `closed_text` /
+   `Outlook unavailable` when nothing has ever been read) and the template's other text
+   labels go blank, so a separator such as ` · ` does not dangle.
 
 Countdown (`format_countdown(event, now, time_format)`). The wait is first rounded up to
 whole minutes, `m = ceil(seconds / 60)`, and the case is chosen from `m`: 24m10s reads
@@ -142,7 +144,8 @@ whole minutes, `m = ceil(seconds / 60)`, and the case is chosen from `m`: 24m10s
 
 Placeholders: `{icon}`, `{countdown}`, `{title}` (subject shortened to `max_title_length`
 with `…`), `{time}` (`14:00–15:00`, or `all day`), `{location}`, `{today_count}` (eligible
-events today that have not ended).
+events today that have not ended). Labels are plain text, and placeholders are filled in
+one pass, so a subject such as `Review <draft> {time}` shows exactly as written.
 
 Label classes, set on the widget's labels so a theme can style them: `soon` (an upcoming
 event starts within `soon_minutes`; 0 turns it off), `ongoing`, `tentative`, `stale`, `empty`, `closed`,
@@ -171,8 +174,9 @@ a stale reading `cached 08:12 · Outlook closed`.
   result. For a recurring item it opens the occurrence
   (`GetRecurrencePattern().GetOccurrence(start)`) and falls back to the series when that
   fails (a moved exception).
-- Empty: `Nothing in the next 7 days` (the number follows `days`). Rows are capped at
-  `menu.max_rows`.
+- Clicking a row or a Join button closes the popup.
+- Empty: `Nothing in the next 7 days` (the number follows `days`; `Nothing today` when
+  `days` is 1). Rows are capped at `menu.max_rows`.
 - Unstyled, the popup reads cleanly under any theme. The docs' Example Style uses the user's
   palette (graphite with chalk text, kraft `#D4A27F` for tentative, clay `#E0834F` for soon),
   with no `var()`s.
@@ -186,8 +190,8 @@ Middle click (`open_outlook`): launches Outlook's calendar view through ShellExe
 class OutlookCalendarConfig(CustomBaseModel):
     label: str = "<span>{icon}</span> {countdown} · {title}"
     label_alt: str = "<span>{icon}</span> {time} · {title}"
-    label_empty: str = "<span>{icon}</span> No events"
-    label_closed: str = "<span>{icon}</span> Outlook closed"
+    empty_text: str = "No events"           # replaces the template when nothing is coming up
+    closed_text: str = "Outlook closed"     # ... when Outlook is closed and nothing is cached
     class_name: str = ""
     days: int = Field(default=7, ge=1, le=31)
     update_interval: int = Field(default=300, ge=60, le=3600)
@@ -216,13 +220,15 @@ class OutlookCalendarConfig(CustomBaseModel):
   - success → `live`, write the cache, reset the failure count
   - `OutlookNotRunning` → keep the events; `stale` if any, else `closed`
   - any other error → keep the snapshot unchanged; after 3 in a row, `error`
-- Emits `snapshot_changed(Snapshot)`. Widgets also re-render every 30 s from the wall clock,
-  so sleep and resume need no special handling.
+- Emits `updated` after every poll result and every 30 seconds (one timer shared by all
+  bars). Widgets re-derive everything from the wall clock on each, so sleep and resume need
+  no special handling.
 - Cache: `%LOCALAPPDATA%\YASB\outlook_calendar.json`, holding
   `{"version": 1, "fetched_at": ..., "events": [...]}` with subject, location, times,
   ids and join URL only. A missing, corrupt or wrong-version cache is ignored (logged at
   debug), never fatal.
-- On shutdown it stops its timer and waits for a running worker.
+- When the last widget releases it, it stops its timers and is deleted, after the running
+  worker finishes if there is one. The UI thread never waits on Outlook.
 
 ## Errors and edge cases
 
