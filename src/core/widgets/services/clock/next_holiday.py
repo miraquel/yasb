@@ -24,7 +24,7 @@ def format_countdown(now: datetime, holiday: date, long: bool = False) -> str:
 
     Far off it counts calendar days (``85d``), within a week days and hours (``2d 14h``),
     under a day hours and minutes (``14h 32m``), and ``Today`` on the day itself.
-    The *long* form reads as a phrase (``in 85 days``) for the calendar popup.
+    The *long* form spells the far-off day count out (``85 days``) for the calendar popup.
     """
     days = (holiday - now.date()).days
     if days <= 0:
@@ -32,16 +32,14 @@ def format_countdown(now: datetime, holiday: date, long: bool = False) -> str:
 
     remaining = datetime.combine(holiday, time(0), tzinfo=now.tzinfo) - now
     if remaining >= _DAYS_ONLY_FROM:
-        return f"in {days} days" if long else f"{days}d"
+        return f"{days} days" if long else f"{days}d"
 
     hours, seconds = divmod(int(remaining.total_seconds()), 3600)
     if hours >= 24:
-        text = f"{hours // 24}d {hours % 24}h"
-    elif hours:
-        text = f"{hours}h {seconds // 60}m"
-    else:
-        text = f"{max(1, seconds // 60)}m"
-    return f"in {text}" if long else text
+        return f"{hours // 24}d {hours % 24}h"
+    if hours:
+        return f"{hours}h {seconds // 60}m"
+    return f"{max(1, seconds // 60)}m"
 
 
 def truncate_name(name: str, max_length: int) -> str:
