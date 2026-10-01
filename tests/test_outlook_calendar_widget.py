@@ -200,6 +200,26 @@ class LabelTests(WidgetTestCase):
         self.assertEqual(label.text(), "in 2h · <b>Budget</b> & {time}")
         self.assertEqual(label.textFormat(), Qt.TextFormat.PlainText)
 
+    def test_text_fills_a_fixed_width(self):
+        # A theme that reserves a fixed slot (max-width) gets the text cut to the slot in pixels,
+        # instead of a character-capped title that leaves the rest of the slot empty.
+        widget = self.make(
+            live(ev(at(1, 11), at(1, 12), "Quarterly planning with the finance team")), max_title_length=0
+        )
+        label = widget._widgets[1]
+        label.setStyleSheet("max-width: 120px;")
+        widget._update_label()
+        text = label.text()
+        self.assertTrue(text.startswith("in 2h · Quarterly"), text)
+        self.assertTrue(text.endswith("…"), text)
+        self.assertLessEqual(label.fontMetrics().horizontalAdvance(text), 120)
+
+    def test_text_is_untouched_without_a_fixed_width(self):
+        widget = self.make(
+            live(ev(at(1, 11), at(1, 12), "Quarterly planning with the finance team")), max_title_length=0
+        )
+        self.assertEqual(self.text(widget), "in 2h · Quarterly planning with the finance team")
+
     def test_today_count_placeholder(self):
         widget = self.make(
             live(ev(at(1, 11), at(1, 12)), ev(at(1, 14), at(1, 15))),

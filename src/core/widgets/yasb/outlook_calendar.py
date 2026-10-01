@@ -11,7 +11,16 @@ from datetime import datetime, timedelta
 
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSpacerItem, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QWIDGETSIZE_MAX,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSpacerItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from core.utils.tooltip import set_tooltip
 from core.utils.utilities import ElidedLabel, PopupWidget, refresh_widget_style
@@ -231,12 +240,27 @@ class OutlookCalendarWidget(BaseWidget):
                 # One pass, so a subject containing "{time}" is not substituted again.
                 filled = _PLACEHOLDER_RE.sub(lambda m: options.get(m.group(0), m.group(0)), part)
                 text = " ".join(filled.split())
-            widget.setText(text)
-            widget.setVisible(bool(text) and (widget in self._widgets) != self._show_alt_label)
+            # Classes first: the theme's font and max-width for this state decide how much fits.
             base = widget.property("base_class") or ""
             widget.setProperty("class", " ".join(p for p in (base, *states) if p))
             refresh_widget_style(widget)
+            widget.setText(self._fit(widget, text))
+            widget.setVisible(bool(text) and (widget in self._widgets) != self._show_alt_label)
         self._update_tooltip(event, now)
+
+    @staticmethod
+    def _fit(label: QLabel, text: str) -> str:
+        """*text* cut to the label's width when a theme gives it a fixed slot (max-width).
+
+        The title is also capped at max_title_length characters, but a fixed slot is better filled
+        to its edge than capped short and left half empty.
+        """
+        limit = label.maximumWidth()
+        if not text or limit >= QWIDGETSIZE_MAX:
+            return text
+        margins = label.contentsMargins()
+        width = max(limit - margins.left() - margins.right(), 0)
+        return label.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, width)
 
     def _update_tooltip(self, event: CalEvent | None, now: datetime) -> None:
         if not self.config.tooltip:

@@ -24,7 +24,7 @@ Click a row to open that event in Outlook. Events with a Microsoft Teams, Zoom o
 | `days`             | integer | `7`                                           | How many days, starting today, the widget looks ahead (1-31). |
 | `update_interval`  | integer | `300`                                         | Seconds between reads of the calendar (60-3600). Opening the popup also reads it. Countdowns tick every 30 seconds regardless. |
 | `soon_minutes`     | integer | `15`                                          | An event starting within this many minutes gets the `soon` class. `0` turns it off (0-240). |
-| `max_title_length` | integer | `20`                                          | Cut `{title}` on the bar to this many characters. `0` means no limit (0-200). |
+| `max_title_length` | integer | `20`                                          | Cut `{title}` on the bar to this many characters. `0` means no limit (0-200). A theme `max-width` on the label also cuts the text to fit; see below. |
 | `time_format`      | string  | `"%H:%M"`                                     | strftime format for times, e.g. `"%I:%M %p"` for 12-hour. It uses Windows strftime, so `%-I`-style flags are rejected when the config loads. |
 | `scan_body`        | boolean | `true`                                        | Also look for a meeting link in the event's body, not just its location. See Troubleshooting. |
 | `tooltip`          | boolean | `true`                                        | Show the event's details on hover. |
@@ -60,6 +60,8 @@ Click a row to open that event in Outlook. Events with a Microsoft Teams, Zoom o
 | `{today_count}` | Events still to come or under way today                         | `3`            |
 
 When there is no event to show, the first text label shows `empty_text`, `closed_text` or `Outlook unavailable`, and the rest of the template is left blank.
+
+To keep neighbouring widgets from moving as the text changes, a theme can give the label a fixed slot, for example `.outlook-calendar-widget .label { min-width: 224px; max-width: 224px; }`. When the label has a `max-width`, the widget cuts the text to that width with `…`, so a long title runs to the edge of the slot instead of stopping short. With a fixed slot, set `max_title_length: 0` and let the width decide.
 
 The bar's labels get these classes, so a theme can style each state:
 
