@@ -43,6 +43,8 @@ from core.widgets.services.outlook_calendar.outlook import open_calendar, open_e
 from core.widgets.services.outlook_calendar.service import OutlookCalendarService
 
 _UNAVAILABLE_TEXT = "Outlook unavailable"
+_CLOSED_TOOLTIP = "Outlook is closed. Open it to load your calendar."
+_UNRESPONSIVE_TOOLTIP = "Outlook isn't responding. It will try again shortly."
 _PLACEHOLDER_RE = re.compile(r"\{\w+\}")
 
 
@@ -266,8 +268,14 @@ class OutlookCalendarWidget(BaseWidget):
         if not self.config.tooltip:
             return
         time_format = self.config.time_format
+        snapshot = self._service.snapshot
         if event is None:
-            lines = [html.escape(self._message()[1])]
+            # The bar may show only the icon when idle, so say what the bar can't: how far ahead
+            # it looked and how fresh that is, or what to do when nothing has been read.
+            if snapshot.fetched_at is None:
+                lines = [_UNRESPONSIVE_TOOLTIP if snapshot.status == "error" else _CLOSED_TOOLTIP]
+            else:
+                lines = [self._nothing_text(), format_status(snapshot, now, time_format)]
         else:
             lines = [
                 f"<strong>{html.escape(event.subject)}</strong>",
@@ -277,9 +285,12 @@ class OutlookCalendarWidget(BaseWidget):
                 lines.append(html.escape(event.location))
             if event.tentative:
                 lines.append("Tentative")
-        if self._staleness():
-            lines.append(format_status(self._service.snapshot, now, time_format))
+            if self._staleness():
+                lines.append(format_status(snapshot, now, time_format))
         set_tooltip(self, "<br>".join(lines))
+
+    def _nothing_text(self) -> str:
+        return "Nothing today" if self.config.days == 1 else f"Nothing in the next {self.config.days} days"
 
     def _toggle_label(self) -> None:
         self._show_alt_label = not self._show_alt_label
@@ -442,10 +453,8 @@ class OutlookCalendarWidget(BaseWidget):
     def _build_placeholder(self) -> QLabel:
         if self._service.snapshot.fetched_at is None:
             state, text = self._message()
-        elif self.config.days == 1:
-            state, text = "empty", "Nothing today"
         else:
-            state, text = "empty", f"Nothing in the next {self.config.days} days"
+            state, text = "empty", self._nothing_text()
         placeholder = _label(f"placeholder {state}", text)
         placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         placeholder.setWordWrap(True)

@@ -214,6 +214,11 @@ class LabelTests(WidgetTestCase):
         self.assertTrue(text.endswith("…"), text)
         self.assertLessEqual(label.fontMetrics().horizontalAdvance(text), 120)
 
+    def test_empty_text_blank_leaves_only_the_icon(self):
+        widget = self.make(live(), empty_text="")
+        self.assertFalse(widget._widgets[1].isVisibleTo(widget))
+        self.assertIn("empty", (widget._widgets[0].property("class") or "").split())
+
     def test_text_is_untouched_without_a_fixed_width(self):
         widget = self.make(
             live(ev(at(1, 11), at(1, 12), "Quarterly planning with the finance team")), max_title_length=0
@@ -245,8 +250,20 @@ class TooltipTests(WidgetTestCase):
         text = self.tooltip(Snapshot((ev(at(1, 11), at(1, 12), "Standup"),), FETCHED, "stale"))
         self.assertTrue(text.endswith("<br>Outlook closed · cached 08:12"), text)
 
-    def test_no_event(self):
-        self.assertEqual(self.tooltip(Snapshot()), "Outlook closed")
+    def test_idle_tooltip_says_how_far_ahead_it_looked(self):
+        # The bar may show only the icon when idle, so the tooltip must not just repeat the bar.
+        self.assertEqual(self.tooltip(live()), "Nothing in the next 7 days<br>updated 08:12")
+        self.assertEqual(self.tooltip(live(), days=1), "Nothing today<br>updated 08:12")
+
+    def test_idle_tooltip_on_a_cached_reading(self):
+        text = self.tooltip(Snapshot((), FETCHED, "stale"))
+        self.assertEqual(text, "Nothing in the next 7 days<br>Outlook closed · cached 08:12")
+
+    def test_tooltip_when_nothing_was_ever_read(self):
+        self.assertEqual(self.tooltip(Snapshot()), "Outlook is closed. Open it to load your calendar.")
+        self.assertEqual(
+            self.tooltip(Snapshot((), None, "error")), "Outlook isn't responding. It will try again shortly."
+        )
 
     def test_tooltip_off(self):
         with mock.patch.object(widget_module, "set_tooltip") as set_tooltip:

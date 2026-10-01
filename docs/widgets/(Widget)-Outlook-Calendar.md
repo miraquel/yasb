@@ -18,7 +18,7 @@ Click a row to open that event in Outlook. Events with a Microsoft Teams, Zoom o
 |--------------------|---------|-----------------------------------------------|-------------|
 | `label`            | string  | `"<span>{icon}</span> {countdown} · {title}"` | The primary label format. |
 | `label_alt`        | string  | `"<span>{icon}</span> {time} · {title}"`      | The alternative label format. |
-| `empty_text`       | string  | `"No events"`                                 | Shown instead of the label when nothing is coming up in the window. |
+| `empty_text`       | string  | `"No events"`                                 | Shown instead of the label when nothing is coming up in the window. Set it to `""` to show only the icon then; the tooltip still says how far ahead the widget looked. |
 | `closed_text`      | string  | `"Outlook closed"`                            | Shown instead of the label when Outlook is closed and nothing has been read yet. |
 | `class_name`       | string  | `""`                                          | Additional CSS class name for the widget. |
 | `days`             | integer | `7`                                           | How many days, starting today, the widget looks ahead (1-31). |
@@ -27,7 +27,7 @@ Click a row to open that event in Outlook. Events with a Microsoft Teams, Zoom o
 | `max_title_length` | integer | `20`                                          | Cut `{title}` on the bar to this many characters. `0` means no limit (0-200). A theme `max-width` on the label also cuts the text to fit; see below. |
 | `time_format`      | string  | `"%H:%M"`                                     | strftime format for times, e.g. `"%I:%M %p"` for 12-hour. It uses Windows strftime, so `%-I`-style flags are rejected when the config loads. |
 | `scan_body`        | boolean | `true`                                        | Also look for a meeting link in the event's body, not just its location. See Troubleshooting. |
-| `tooltip`          | boolean | `true`                                        | Show the event's details on hover. |
+| `tooltip`          | boolean | `true`                                        | Show the event's details on hover. With no event, it says how far ahead the widget looked and when it last read Outlook (`Nothing in the next 7 days`, `updated 11:53`), or what to do if Outlook is closed. |
 | `icons`            | dict    | `{default: ""}`                              | The widget's icon, used for `{icon}` and in the popup header. |
 | `menu`             | dict    | see below                                     | Popup settings. |
 | `callbacks`        | dict    | `{on_left: "toggle_card", on_middle: "open_outlook", on_right: "toggle_label"}` | Mouse button actions. |
