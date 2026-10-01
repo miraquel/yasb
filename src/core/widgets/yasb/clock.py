@@ -40,6 +40,7 @@ from core.utils.win32.backdrop import enable_blur
 from core.utils.win32.utils import apply_qmenu_style
 from core.validation.widgets.yasb.clock import ClockConfig
 from core.widgets.base import BaseWidget
+from core.widgets.services.clock.next_holiday import find_next_holiday, format_countdown, truncate_name
 from settings import SCRIPT_PATH
 
 
@@ -64,6 +65,8 @@ class SnoozedAlarm(TypedDict):
 type LocaleSetting = tuple[str | None, str | None]
 
 _holidays_cache: _HolidaysCache = {"module": None, "supported_countries": None, "country_holidays": {}}
+_HOLIDAY_TOKENS = ("{holiday}", "{holiday_countdown}")
+_HOLIDAY_NAME_MAX_LENGTH = 20
 NOTIFICATION_SOUND = os.path.join(SCRIPT_PATH, "assets", "sound", "notification02.wav")
 
 
@@ -396,6 +399,8 @@ class ClockWidget(BaseWidget):
         self._current_minute: str | None = None
         self._previous_alarm_state = False
         self._timer_visible = False
+        self._next_holiday_cache = None
+        self._next_holiday_popup = None
         self._country_code = self.config.calendar.country_code or self.get_country_code()
         self._subdivision = self.config.calendar.subdivision
         self._init_container()
@@ -429,8 +434,58 @@ class ClockWidget(BaseWidget):
         self._next_timezone()
         self.update_label()
 
-        if self.config.calendar.show_holidays:
+        if self._wants_holidays():
             QTimer.singleShot(0, _get_holidays_module)
+
+    def _wants_holidays(self):
+        """True when any holiday feature is on: grid highlighting, the next-holiday block or a label placeholder."""
+        labels = f"{self.config.label}{self.config.label_alt}"
+        return (
+            self.config.calendar.show_holidays
+            or self.config.calendar.show_next_holiday
+            or any(token in labels for token in _HOLIDAY_TOKENS)
+        )
+
+    def _get_next_holiday(self, today):
+        """Return the nearest ``(date, name)`` on or after *today* for the configured country, cached per day."""
+        if self._next_holiday_cache and self._next_holiday_cache[0] == today:
+            return self._next_holiday_cache[1]
+        if _holidays_cache["supported_countries"] is None:
+            # The holidays module is still loading; try again on a later tick.
+            return None
+        country = _supported_country(self._country_code)
+        result = None
+        if country:
+            holidays = {}
+            for year in (today.year, today.year + 1):
+                holidays.update(_get_cached_country_holidays(country, year, self._subdivision))
+            result = find_next_holiday(holidays, today)
+        self._next_holiday_cache = (today, result)
+        return result
+
+    def _replace_holiday_tokens(self, text, now):
+        """Fill the holiday placeholders in *text*; returns the text and whether a holiday was found."""
+        next_holiday = self._get_next_holiday(now.date())
+        if next_holiday is None:
+            name = countdown = ""
+        else:
+            day, holiday_name = next_holiday
+            name = truncate_name(holiday_name, _HOLIDAY_NAME_MAX_LENGTH)
+            countdown = format_countdown(now, day)
+        text = text.replace("{holiday_countdown}", countdown).replace("{holiday}", name)
+        return text, next_holiday is not None
+
+    def _refresh_next_holiday_popup(self, now):
+        """Keep the open calendar popup's countdown current."""
+        if self._next_holiday_popup is None:
+            return
+        label, day, date_text = self._next_holiday_popup
+        try:
+            if label.isVisible():
+                label.setText(f"{date_text} · {format_countdown(now, day, long=True)}")
+        except RuntimeError:
+            # The popup was closed and Qt deleted the label.
+            self._next_holiday_popup = None
 
     def _on_timer_tick(self):
         """Forward a timer tick event into the shared state handler."""
@@ -593,6 +648,12 @@ class ClockWidget(BaseWidget):
                             active_widgets[widget_index].setText("")
                             active_widgets[widget_index].setVisible(False)
 
+                    elif any(token in icon_placeholder for token in _HOLIDAY_TOKENS):
+                        holiday_text, has_holiday = self._replace_holiday_tokens(icon_placeholder, now)
+                        if active_widgets[widget_index].text() != holiday_text:
+                            active_widgets[widget_index].setText(holiday_text)
+                        active_widgets[widget_index].setVisible(has_holiday)
+
                     else:
                         active_widgets[widget_index].setText(icon_placeholder)
                 else:
@@ -609,6 +670,10 @@ class ClockWidget(BaseWidget):
                             part = part.replace("{alarm}", self.config.alarm_icons.enabled)
                         else:
                             part = part.replace("{alarm}", "")
+
+                    # Before the strftime step: its greedy \{(.*)} would swallow these placeholders.
+                    if any(token in part for token in _HOLIDAY_TOKENS):
+                        part = self._replace_holiday_tokens(part, now)[0]
                     format_label_content = part
                     datetime_format_search = re.search(r"\{(.*)}", part)
                     if datetime_format_search:
@@ -637,6 +702,7 @@ class ClockWidget(BaseWidget):
                 widget_index += 1
 
         self._restore_locale_context(org_locale_time, org_locale_ctype)
+        self._refresh_next_holiday_popup(now)
 
     def update_tooltip(self):
         if self._tooltip:
@@ -725,7 +791,7 @@ class ClockWidget(BaseWidget):
 
     def get_country_code(self) -> str | None:
         """Try to detect the user's country code from Windows geo APIs."""
-        if not self.config.calendar.show_holidays:
+        if not self._wants_holidays():
             return None
         import ctypes
 
@@ -743,6 +809,35 @@ class ClockWidget(BaseWidget):
             pass
 
         return None
+
+    def _add_next_holiday_block(self, layout, now, qlocale):
+        """Add the nearest holiday and a live countdown to it under the popup's date panel."""
+        next_holiday = self._get_next_holiday(now.date())
+        if next_holiday is None:
+            return
+        day, name = next_holiday
+
+        frame = QFrame()
+        frame.setProperty("class", "next-holiday")
+        block = QVBoxLayout(frame)
+        block.setContentsMargins(0, 0, 0, 0)
+        block.setSpacing(0)
+
+        header = QLabel("Next holiday")
+        header.setProperty("class", "next-holiday-header")
+        name_label = QLabel(name)
+        name_label.setProperty("class", "next-holiday-name")
+        name_label.setWordWrap(True)
+        date_label = QLabel()
+        date_label.setProperty("class", "next-holiday-date")
+        for label in (header, name_label, date_label):
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            block.addWidget(label)
+
+        date_text = qlocale.toString(QDate(day.year, day.month, day.day), "ddd d MMM")
+        date_label.setText(f"{date_text} · {format_countdown(now, day, long=True)}")
+        self._next_holiday_popup = (date_label, day, date_text)
+        layout.addWidget(frame)
 
     def show_calendar(self):
         """Build and show the calendar popup (includes optional extended UI)."""
@@ -807,6 +902,9 @@ class ClockWidget(BaseWidget):
             self.holiday_label.setWordWrap(True)
             date_layout.addWidget(self.holiday_label)
             self.update_holiday_label(QDate(datetime_now.year, datetime_now.month, datetime_now.day))
+        self._next_holiday_popup = None
+        if self.config.calendar.show_next_holiday:
+            self._add_next_holiday_block(date_layout, datetime_now, qlocale)
 
         layout.addLayout(date_layout)
 
