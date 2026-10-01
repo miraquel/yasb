@@ -248,6 +248,8 @@ Don't put `color` on `::item` for a red weekday header: it paints over the heade
 /* All popup window in this widget share the .clock-popup base class */
 /* Calendar popup styles */
 .clock-popup.calendar {}
+/* Holds the popup's content; pad the popup here (.clock-popup.calendar itself ignores padding) */
+.clock-popup.calendar .calendar-container {}
 .clock-popup.calendar .calendar-layout {}
 .clock-popup.calendar .calendar-table {}
 .clock-popup.calendar .calendar-table::item {}

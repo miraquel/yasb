@@ -954,10 +954,15 @@ class ClockWidget(BaseWidget):
         )
         self._yasb_calendar.setProperty("class", "clock-popup calendar")
 
-        # Create main layout
-        layout = QHBoxLayout()
+        # Create main layout. PopupWidget is a bare QWidget, which ignores QSS padding, so the content
+        # sits in a QFrame the stylesheet can pad (.calendar-container); the popup keeps its usual margins.
+        popup_layout = QVBoxLayout(self._yasb_calendar)
+        container = QFrame()
+        container.setProperty("class", "calendar-container")
+        popup_layout.addWidget(container)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setProperty("class", "calendar-layout")
-        self._yasb_calendar.setLayout(layout)
 
         # Left side: Today Date
         date_layout = QVBoxLayout()

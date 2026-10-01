@@ -18,7 +18,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from PyQt6 import sip  # noqa: E402
-from PyQt6.QtCore import Qt  # noqa: E402
+from PyQt6.QtCore import QPoint, Qt  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QWidget  # noqa: E402
 
 APP = QApplication.instance() or QApplication([])
@@ -194,10 +194,30 @@ class PopupBlockTests(HolidayTestCase):
     def test_grid_and_date_panel_hang_from_the_top(self) -> None:
         self.widget = make_widget("{%H:%M}", show_next_holiday=True)
         self.widget.show_calendar()
-        layout = self.widget._yasb_calendar.layout()
+        layout = self.widget.calendar.parentWidget().layout()
         grid = layout.itemAt(layout.indexOf(self.widget.calendar))
         self.assertTrue(grid.alignment() & Qt.AlignmentFlag.AlignTop)
         self.assertTrue(layout.itemAt(0).layout().alignment() & Qt.AlignmentFlag.AlignTop)
+
+    def test_content_sits_in_a_frame_the_stylesheet_can_pad(self) -> None:
+        # PopupWidget is a bare QWidget, which ignores QSS padding; a QFrame inside it takes it.
+        self.widget = make_widget("{%H:%M}", show_next_holiday=True)
+        self.widget.show_calendar()
+        popup = self.widget._yasb_calendar
+        container = by_class(popup, "calendar-container")
+        self.assertIsInstance(container, QFrame)
+        self.assertIs(self.widget.calendar.parentWidget(), container)
+
+        def day_label_x() -> int:
+            popup.layout().activate()
+            container.layout().activate()
+            return self.widget.day_label.mapTo(popup, QPoint(0, 0)).x()
+
+        before = day_label_x()
+        APP.setStyleSheet(".calendar-container { padding: 0 0 0 20px; }")
+        self.addCleanup(APP.setStyleSheet, "")
+        APP.processEvents()
+        self.assertEqual(day_label_x() - before, 20)
 
     def test_a_deleted_popup_does_not_break_the_tick(self) -> None:
         self.widget = make_widget("{%H:%M}", show_next_holiday=True)
