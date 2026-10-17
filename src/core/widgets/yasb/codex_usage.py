@@ -32,6 +32,16 @@ from core.utils.utilities import (
 from core.validation.widgets.yasb.codex_usage import CodexUsageConfig
 from core.widgets.base import BaseWidget
 from core.widgets.services.codex_usage.codex_api import CodexUsageService
+from core.widgets.services.codex_usage.sessions import (
+    STATUS_IDLE,
+    STATUS_WAITING,
+    STATUS_WORKING,
+    CodexSessionsService,
+    count_sessions,
+    turn_events,
+)
+
+_SESSION_STATES = (STATUS_WORKING, STATUS_WAITING, STATUS_IDLE)
 
 
 class UsageBar(QFrame):
@@ -226,6 +236,20 @@ class CodexUsageWidget(BaseWidget):
         )
         self._data: dict[str, Any] = self._service.latest()
 
+        # Live Codex sessions (optional), from Codex's own files.
+        self._sessions_service: CodexSessionsService | None = None
+        self._sessions: list[dict[str, Any]] = []
+        # Turns that ended since the pet last looked: "finished" / "failed".
+        self._pending_events: list[str] = []
+        self._session_summary: QLabel | None = None
+        self._session_rows: QFrame | None = None
+        self._session_layout: QGridLayout | None = None
+        if self.config.sessions.enabled:
+            self._sessions_service = CodexSessionsService.get_instance(
+                self.config.sessions.poll_interval, self.config.sessions.idle_minutes
+            )
+            self._sessions = self._sessions_service.latest()
+
         self.progress_widget = build_progress_widget(self, self.config.progress_bar.model_dump())
         self._init_container()
         self.build_widget_label(self.config.label, self.config.label_alt)
@@ -242,6 +266,8 @@ class CodexUsageWidget(BaseWidget):
         self.callback_right = self.config.callbacks.on_right
 
         self._service.data_ready.connect(self._on_data)
+        if self._sessions_service is not None:
+            self._sessions_service.data_ready.connect(self._on_sessions_data)
         self.destroyed.connect(lambda *_: self._release_service())
         self._update_label()
 
@@ -257,6 +283,11 @@ class CodexUsageWidget(BaseWidget):
             self._service.release()
         except RuntimeError:
             pass
+        if self._sessions_service is not None:
+            try:
+                self._sessions_service.release()
+            except RuntimeError:
+                pass
 
     def _refresh(self) -> None:
         if is_valid_qobject(self._menu) and self._menu.isVisible() and is_valid_qobject(self._refresh_button):
@@ -266,12 +297,58 @@ class CodexUsageWidget(BaseWidget):
             self._refresh_button.start_animation()
             self._set_refresh_feedback("Refreshing…", "busy")
         self._service.refresh_now()
+        if self._sessions_service is not None:
+            self._sessions_service.refresh_now()
 
     def _on_data(self, data: dict[str, Any]) -> None:
         self._data = data
         self._update_label()
         self._sync_menu()
         self._finish_refresh_feedback(not data.get("stale"))
+
+    def _on_sessions_data(self, sessions: list[dict[str, Any]]) -> None:
+        # Kept short: nothing may consume them for a while (the popup closed, no pet).
+        self._pending_events = (self._pending_events + turn_events(self._sessions, sessions))[-8:]
+        self._sessions = sessions
+        self._update_label()
+        self._sync_sessions_section()
+
+    def _session_values(self) -> dict[str, str]:
+        counts = count_sessions(self._sessions)
+        sc = self.config.sessions
+        badge = []
+        if counts[STATUS_WORKING]:
+            badge.append(f"{sc.working_icon}{counts[STATUS_WORKING]}")
+        if counts[STATUS_WAITING]:
+            badge.append(f"{sc.waiting_icon}{counts[STATUS_WAITING]}")
+        return {
+            "sessions_total": str(counts["total"]),
+            "sessions_working": str(counts[STATUS_WORKING]),
+            "sessions_waiting": str(counts[STATUS_WAITING]),
+            "sessions_idle": str(counts[STATUS_IDLE]),
+            # Only what needs attention, so it renders empty (and hides) when all is quiet.
+            "sessions_badge": " ".join(badge),
+        }
+
+    def _session_state(self) -> str:
+        """The most pressing session state, for the label's state class."""
+        counts = count_sessions(self._sessions)
+        if counts[STATUS_WAITING]:
+            return STATUS_WAITING
+        if counts[STATUS_WORKING]:
+            return STATUS_WORKING
+        return STATUS_IDLE
+
+    def _sessions_summary_text(self) -> str:
+        counts = count_sessions(self._sessions)
+        if not counts["total"]:
+            return "None running"
+        parts = [f"{counts['total']} open"]
+        if counts[STATUS_WORKING]:
+            parts.append(f"{counts[STATUS_WORKING]} working")
+        if counts[STATUS_WAITING]:
+            parts.append(f"{counts[STATUS_WAITING]} waiting")
+        return " · ".join(parts)
 
     def _set_refresh_feedback(self, text: str, state: str) -> None:
         if not is_valid_qobject(self._refresh_status):
@@ -385,6 +462,7 @@ class CodexUsageWidget(BaseWidget):
             "plan": str(self._data.get("plan") or "--"),
             "credits": str(self._data.get("credits") if self._data.get("credits") is not None else "--"),
             "stale": self.config.stale_icon if self._data.get("stale") else "",
+            **self._session_values(),
         }
 
     def _build_header_icon(self) -> QLabel | None:
@@ -464,6 +542,11 @@ class CodexUsageWidget(BaseWidget):
                 rendered = text
             widget.setText(rendered)
             widget.setVisible(bool(rendered))
+            if "{sessions_" in part:
+                # .working / .waiting on the badge's own label, so waiting can stand out.
+                base = widget.property("class") or "sessions"
+                base = " ".join(t for t in base.split() if t not in _SESSION_STATES)
+                widget.setProperty("class", f"{base} {self._session_state()}")
 
         active_window = self._active_window()
         if self.progress_widget:
@@ -486,6 +569,8 @@ class CodexUsageWidget(BaseWidget):
             lines = [window_line(primary, "primary")]
             if secondary:
                 lines.append(window_line(secondary, "secondary"))
+            if self._sessions_service is not None:
+                lines.append(f"Sessions: {self._sessions_summary_text().lower()}")
             account = self._account_line()
             if account:
                 lines.append(account)
@@ -505,6 +590,7 @@ class CodexUsageWidget(BaseWidget):
         if not is_valid_qobject(self._menu):
             self._build_menu()
         self._sync_menu()
+        self._sync_sessions_section()
         self._menu.adjustSize()
         self._menu.setPosition(
             alignment=self.config.menu.alignment,
@@ -1147,10 +1233,110 @@ class CodexUsageWidget(BaseWidget):
         layout.addWidget(header)
         layout.addWidget(self._build_section("primary", "Primary"))
         layout.addWidget(self._build_section("secondary", "Secondary"))
+        if self.config.sessions.enabled and self.config.sessions.show_in_menu:
+            layout.addWidget(self._build_sessions_section())
         layout.addWidget(self._build_pager())
 
         # Before the first measure: the indent it removes is part of each label's width.
         align_label_text(self._menu)
+
+    def _build_sessions_section(self) -> QFrame:
+        """Sessions section: what Codex is doing right now, one row per open chat.
+
+        The same structure and classes as the Claude popup's, so one set of rules styles both.
+        """
+        frame = QFrame()
+        frame.setProperty("class", "section sessions")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        title_row = QFrame()
+        title_row.setProperty("class", "title-row")
+        title_layout = QHBoxLayout(title_row)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(0)
+        title_label = QLabel("Sessions")
+        title_label.setProperty("class", "title")
+        title_layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        title_layout.addStretch()
+        self._session_summary = QLabel("")
+        self._session_summary.setProperty("class", "summary")
+        self._session_summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        title_layout.addWidget(self._session_summary)
+        layout.addWidget(title_row)
+
+        self._session_rows = QFrame()
+        self._session_rows.setProperty("class", "session-rows")
+        self._session_layout = QGridLayout(self._session_rows)
+        self._session_layout.setContentsMargins(0, 0, 0, 0)
+        self._session_layout.setHorizontalSpacing(8)
+        self._session_layout.setVerticalSpacing(4)
+        self._session_layout.setColumnStretch(1, 1)
+        layout.addWidget(self._session_rows)
+        return frame
+
+    @staticmethod
+    def _clip(text: str, limit: int) -> str:
+        return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+    @staticmethod
+    def _session_detail(session: dict[str, Any]) -> str:
+        if session["status"] == STATUS_WORKING:
+            detail = "working"
+        elif session["status"] == STATUS_WAITING:
+            detail = f"needs you · {session['tool']}" if session["tool"] else "needs you"
+        else:
+            detail = "idle"
+        return f"{detail} · {session['app']}" if session["app"] else detail
+
+    def _sync_sessions_section(self) -> None:
+        """Rebuild the session rows and refit the popup's height to them."""
+        if self._session_layout is None:
+            return
+        sc = self.config.sessions
+        icons = {STATUS_WORKING: sc.working_icon, STATUS_WAITING: sc.waiting_icon, STATUS_IDLE: sc.idle_icon}
+        try:
+            self._session_summary.setText(self._sessions_summary_text())
+            while self._session_layout.count():
+                item = self._session_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    # Detached now (not just deleteLater) so the size hint below is current.
+                    widget.setParent(None)
+                    widget.deleteLater()
+            # Waiting first: those are the rows that want something from you.
+            order = {STATUS_WAITING: 0, STATUS_WORKING: 1, STATUS_IDLE: 2}
+            sessions = sorted(self._sessions, key=lambda s: order[s["status"]])
+            shown = sessions[: sc.max_rows]
+            for row, session in enumerate(shown):
+                marker = QLabel(icons[session["status"]])
+                marker.setProperty("class", f"marker {session['status']}")
+                name = QLabel(self._clip(session["name"], 30))
+                name.setProperty("class", "name")
+                detail = QLabel(self._clip(self._session_detail(session), 28))
+                detail.setProperty("class", f"detail {session['status']}")
+                detail.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                folder = session["cwd"] or session["name"]
+                for widget in (marker, name, detail):
+                    set_tooltip(widget, f"{session['name']}\n{folder}")
+                self._session_layout.addWidget(marker, row, 0)
+                self._session_layout.addWidget(name, row, 1)
+                self._session_layout.addWidget(detail, row, 2)
+            if len(sessions) > len(shown) and sc.max_rows:
+                more = QLabel(f"+{len(sessions) - len(shown)} more")
+                more.setProperty("class", "more")
+                self._session_layout.addWidget(more, len(shown), 1, 1, 2)
+            self._session_rows.setVisible(bool(shown))
+            align_label_text(self._session_rows)
+            if is_valid_qobject(self._menu) and self._menu.isVisible():
+                # Recompute now, then resize the height only, as _fit_page_height does.
+                self._menu.layout().activate()
+                self._menu.resize(self._menu.width(), self._menu.sizeHint().height())
+        except RuntimeError:
+            self._session_summary = None
+            self._session_rows = None
+            self._session_layout = None
 
     def _sync_reset_credits(self) -> None:
         if not is_valid_qobject(self._reset_credits_count):

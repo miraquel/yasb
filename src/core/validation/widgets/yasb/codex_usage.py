@@ -46,6 +46,22 @@ class CodexUsageProgressBarConfig(CustomBaseModel):
     animation: bool = True
 
 
+class CodexSessionsConfig(CustomBaseModel):
+    # Live Codex sessions (working / waiting / idle), read from Codex's own files in ~/.codex.
+    enabled: bool = False
+    show_in_menu: bool = True
+    # Rows listed in the popup; the rest collapse into "+N more". 0 shows only the counts.
+    max_rows: int = Field(default=6, ge=0, le=20)
+    poll_interval: int = Field(default=2, ge=1, le=60)
+    # Codex keeps finished chats loaded for hours (Claude Code's Codex plugin, the desktop app),
+    # so an idle one only counts while its last turn is this recent.
+    idle_minutes: int = Field(default=30, ge=1, le=1440)
+    # nf-md-play, as on the Claude widget.
+    working_icon: str = "󰐊"
+    waiting_icon: str = "?"
+    idle_icon: str = "○"
+
+
 class CodexUsageConfig(CustomBaseModel):
     label: str = "Codex {primary_remaining}%"
     label_alt: str = "Codex {secondary_window} {secondary_remaining}%"
@@ -67,6 +83,7 @@ class CodexUsageConfig(CustomBaseModel):
     show_account: bool = True
     show_token_usage: bool = True
     stale_icon: str = "⚠"
+    sessions: CodexSessionsConfig = CodexSessionsConfig()
     progress_bar: CodexUsageProgressBarConfig = CodexUsageProgressBarConfig()
     callbacks: CodexUsageCallbacksConfig = CodexUsageCallbacksConfig()
     menu: CodexUsageMenuConfig = CodexUsageMenuConfig()

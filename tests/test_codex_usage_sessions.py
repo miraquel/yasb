@@ -21,6 +21,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from core.validation.widgets.yasb.codex_usage import CodexUsageConfig  # noqa: E402
 from core.widgets.services.codex_usage.sessions import (  # noqa: E402
     LOCK_MISSING,
     LOCK_OPEN,
@@ -275,6 +276,15 @@ class CodexSessionsTest(unittest.TestCase):
         (self.markers / "t2.json").write_text("{not json", encoding="utf-8")
         self.assertIsNone(read_marker(str(self.markers), "t2"))
         self.assertIsNone(read_marker(str(self.markers), "t3"))
+
+
+class CodexSessionsConfigTest(unittest.TestCase):
+    def test_defaults_are_off_and_match_the_spec(self):
+        config = CodexUsageConfig()
+        self.assertFalse(config.sessions.enabled)
+        self.assertEqual(
+            (config.sessions.idle_minutes, config.sessions.poll_interval, config.sessions.max_rows), (30, 2, 6)
+        )
 
 
 if __name__ == "__main__":

@@ -79,6 +79,7 @@ codex_usage:
 | `usage_mode` | string | `remaining` | Whether `{*_value}` and the progress bar report the share still available (`remaining`) or consumed (`used`). Flipped at runtime by the `toggle_usage_mode` callback. Note the Claude widget defaults to `used`, so set both explicitly if you run them side by side. |
 | `mode_label_used` | string | `used` | The word `{mode}` renders while showing consumed. |
 | `mode_label_remaining` | string | `left` | The word `{mode}` renders while showing remaining. |
+| `sessions` | dictionary | `{'enabled': false, ...}` | Live Codex sessions. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
 | `progress_bar` | dictionary | See example | Native bar indicator showing the active window's remaining percentage. |
 | `callbacks` | dictionary | See example | Mouse actions. |
 | `menu` | dictionary | See example | Popup position, appearance, section visibility, and Fluent navigation icons. `icon` takes a path to an image drawn at 22x22 at the left of the popup header, beside the title and account line; any format Qt can read works, and an empty value leaves the header unmarked. |
@@ -153,6 +154,11 @@ but are marked as unavailable rather than incorrectly displayed as zero usage.
 - `{plan}` - account plan reported by Codex.
 - `{credits}` - available credit balance, when present.
 - `{stale}` - warning glyph when the last refresh failed and cached data is displayed.
+- `{sessions_badge}` - working and waiting Codex sessions in one compact string (e.g. `▶2 ?1`),
+  empty when nothing is working or waiting. Its label gets a `.working` / `.waiting` / `.idle`
+  class for the most pressing state, so place it in its own `<span>`. Requires
+  `sessions.enabled`.
+- `{sessions_total}` `{sessions_working}` `{sessions_waiting}` `{sessions_idle}` - the counts.
 
 Window names are deliberately derived from `windowDurationMins` instead of assuming that every
 account has a 5-hour and weekly limit. Missing secondary limits render as `--` and are omitted
@@ -544,6 +550,42 @@ Qt scales these logical pixel sizes with the active Windows display scale. The c
     background-color: transparent;
     border: 1px solid rgba(255, 255, 255, 0.08);
 }
+```
+
+## Pet, sessions, hearts and footer
+
+The same extras as the Claude widget's Clawd section, for Codex. Each part is off by default and
+can be turned on on its own.
+
+```yaml
+    sessions:
+      enabled: true
+      show_in_menu: true
+      max_rows: 6          # rows listed; the rest collapse into "+N more"
+      poll_interval: 2     # seconds between reads (1-60)
+      idle_minutes: 30     # an idle chat counts while its last turn is this recent (1-1440)
+```
+
+- **sessions:** Live sessions read from Codex's own files, read-only and with no network: a
+  chat counts while a Codex process holds its lock in `~/.codex/thread-writer-locks`, so a
+  closed or crashed one never lingers. It is *working* while its newest turn runs, *waiting*
+  while Codex asks for your approval (needs the optional hook below), and *idle* otherwise.
+  Codex keeps finished chats loaded for hours (Claude Code's Codex plugin and the desktop app
+  do), so an idle chat only counts while its last turn is under `idle_minutes` old. Sub-agents
+  count towards the chat that started them. The popup lists them, waiting ones first, each with
+  the app that started it (`Claude Code`, `Desktop`, `terminal`, `exec`), under a summary like
+  `3 open · 1 working`. `~/.codex/auth.json` is never opened.
+
+The sessions section uses the Claude popup's classes, so its rules can be shared:
+
+```css
+.codex-usage-menu .section.sessions {}
+.codex-usage-menu .section.sessions .title-row .title {}
+.codex-usage-menu .section.sessions .title-row .summary {}
+.codex-usage-menu .section.sessions .marker.working {}   /* also .waiting / .idle */
+.codex-usage-menu .section.sessions .name {}
+.codex-usage-menu .section.sessions .detail.waiting {}   /* also .working / .idle */
+.codex-usage-menu .section.sessions .more {}
 ```
 
 ## Troubleshooting

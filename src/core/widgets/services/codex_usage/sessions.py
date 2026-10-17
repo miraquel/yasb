@@ -18,9 +18,13 @@ import logging
 import os
 import re
 import sqlite3
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+
+from core.utils.system import app_data_path
 from core.widgets.services.claude_usage.sessions import STATUS_IDLE, STATUS_WAITING, STATUS_WORKING, count_sessions
 
 __all__ = [
@@ -30,6 +34,7 @@ __all__ = [
     "STATUS_IDLE",
     "STATUS_WAITING",
     "STATUS_WORKING",
+    "CodexSessionsService",
     "app_hint",
     "codex_home",
     "count_sessions",
@@ -276,3 +281,74 @@ def turn_events(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> li
         elif session["turn_status"] in _FAILED:
             events.append("failed")
     return events
+
+
+class CodexSessionsService(QObject):
+    """Shared poller for Codex's sessions, reference-counted like ``ClaudeSessionsService``.
+
+    One read opens two small databases and probes a few lock files: a few milliseconds, so it
+    runs on the GUI thread. A read that fails (a database mid-write, a newer schema) keeps the
+    last good list rather than flashing "no sessions".
+    """
+
+    data_ready = pyqtSignal(list)
+
+    _instances: ClassVar[dict[tuple, CodexSessionsService]] = {}
+
+    @classmethod
+    def get_instance(cls, poll_interval_s: int, idle_minutes: int) -> CodexSessionsService:
+        key = (int(poll_interval_s), int(idle_minutes))
+        inst = cls._instances.get(key)
+        if inst is None:
+            inst = cls(poll_interval_s=int(poll_interval_s), idle_minutes=int(idle_minutes), _key=key)
+            cls._instances[key] = inst
+        inst._refcount += 1
+        return inst
+
+    def __init__(self, poll_interval_s: int, idle_minutes: int, _key: tuple):
+        super().__init__()
+        self._key = _key
+        self._refcount = 0
+        self._idle_minutes = idle_minutes
+        self._home = codex_home()
+        self._markers = str(app_data_path("codex-waiting"))
+        self._data: list[dict[str, Any]] = []
+        self._signature: tuple = ()
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(max(poll_interval_s, 1) * 1000)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+        self._tick()
+
+    def latest(self) -> list[dict[str, Any]]:
+        return self._data
+
+    def release(self) -> None:
+        self._refcount -= 1
+        if self._refcount > 0:
+            return
+        self._timer.stop()
+        CodexSessionsService._instances.pop(self._key, None)
+        self.deleteLater()
+
+    def refresh_now(self) -> None:
+        self._tick()
+
+    def _tick(self) -> None:
+        try:
+            sessions = read_codex_sessions(self._home, self._markers, time.time(), self._idle_minutes)
+        except Exception as e:
+            logger.debug("Codex session scan failed: %s", e)
+            return
+        if sessions is None:
+            return
+        # Only announce a change: the popup rebuilds its rows on every emit.
+        signature = tuple(
+            (s["session_id"], s["status"], s["turn_id"], s["turn_status"], s["name"], s["tool"]) for s in sessions
+        )
+        if signature == self._signature:
+            return
+        self._signature = signature
+        self._data = sessions
+        self.data_ready.emit(sessions)
