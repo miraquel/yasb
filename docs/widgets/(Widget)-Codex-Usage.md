@@ -79,14 +79,20 @@ codex_usage:
 | `usage_mode` | string | `remaining` | Whether `{*_value}` and the progress bar report the share still available (`remaining`) or consumed (`used`). Flipped at runtime by the `toggle_usage_mode` callback. Note the Claude widget defaults to `used`, so set both explicitly if you run them side by side. |
 | `mode_label_used` | string | `used` | The word `{mode}` renders while showing consumed. |
 | `mode_label_remaining` | string | `left` | The word `{mode}` renders while showing remaining. |
+| `warn_percent` | integer | `50` | Share used from which the bars, percentages and ring turn from good to low (1-100). |
+| `crit_percent` | integer | `80` | Share used from which they turn critical (1-100). The defaults keep the original split: 50% and 20% left. |
 | `sessions` | dictionary | `{'enabled': false, ...}` | Live Codex sessions. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
+| `hearts` | dictionary | `{'enabled': false, 'scale': 1.35}` | Pixel hearts in the popup header. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
+| `footer` | dictionary | `{'enabled': false, ...}` | Plan, account and freshness line closing the popup. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
 | `progress_bar` | dictionary | See example | Native bar indicator showing the active window's remaining percentage. |
 | `callbacks` | dictionary | See example | Mouse actions. |
 | `menu` | dictionary | See example | Popup position, appearance, section visibility, and Fluent navigation icons. `icon` takes a path to an image drawn at 22x22 at the left of the popup header, beside the title and account line; any format Qt can read works, and an empty value leaves the header unmarked. |
 
 The progress bar supports `circular`, `linear_horizontal`, and `linear_vertical`. `color` may be
 a single color or a list of gradient colors. Right-click toggles the active label/window, and
-the progress bar follows it.
+the progress bar follows it. Set `progress_bar.level_colors` (`low`, `medium`, `high`, as on the
+Claude widget) to recolour the ring by `warn_percent` / `crit_percent` instead: `low` while under
+warn, `medium` from warn, `high` from crit, always from the share used.
 
 ## Details Popup
 
@@ -564,6 +570,12 @@ can be turned on on its own.
       max_rows: 6          # rows listed; the rest collapse into "+N more"
       poll_interval: 2     # seconds between reads (1-60)
       idle_minutes: 30     # an idle chat counts while its last turn is this recent (1-1440)
+    hearts:
+      enabled: true
+    footer:
+      enabled: true
+      show_plan: true
+      stale_after: 0       # seconds; 0 = past cache_ttl + 2 x update_interval
 ```
 
 - **sessions:** Live sessions read from Codex's own files, read-only and with no network: a
@@ -575,8 +587,16 @@ can be turned on on its own.
   count towards the chat that started them. The popup lists them, waiting ones first, each with
   the app that started it (`Claude Code`, `Desktop`, `terminal`, `exec`), under a summary like
   `3 open · 1 working`. `~/.codex/auth.json` is never opened.
+- **hearts:** Three hearts in the header, tamagotchi-style: every half heart is about 16.7% of
+  the main window left (whatever its length; a week on some plans), and they empty only at 100%.
+  Hovering says how much is left. Their colours are `-qproperty-heartcolor` and
+  `-qproperty-emptycolor` on `.codex-usage-menu .header .hearts`.
+- **footer:** A closing line with the plan and the account, and on the right when the numbers
+  last arrived (`updated 14:05`), which turns into `stale · 14:05` once they stop arriving or a
+  refresh fails. With the footer on, the account moves out of the header and the Overview page
+  drops its `Updated` row. Signed out shows as `not signed in` with the `signed-out` class.
 
-The sessions section uses the Claude popup's classes, so its rules can be shared:
+The sessions section and the footer use the Claude popup's classes, so their rules can be shared:
 
 ```css
 .codex-usage-menu .section.sessions {}
@@ -586,6 +606,10 @@ The sessions section uses the Claude popup's classes, so its rules can be shared
 .codex-usage-menu .section.sessions .name {}
 .codex-usage-menu .section.sessions .detail.waiting {}   /* also .working / .idle */
 .codex-usage-menu .section.sessions .more {}
+.codex-usage-menu .header .hearts {}
+.codex-usage-menu .meta {}
+.codex-usage-menu .meta .account {}                      /* also .signed-out */
+.codex-usage-menu .meta .updated {}                      /* also .stale */
 ```
 
 ## Troubleshooting

@@ -29,6 +29,8 @@ from core.utils.utilities import (
     build_progress_widget,
     refresh_widget_style,
 )
+from core.utils.widgets.ai_usage.hearts import heart_halves
+from core.utils.widgets.ai_usage.scene import HeartsView
 from core.validation.widgets.yasb.codex_usage import CodexUsageConfig
 from core.widgets.base import BaseWidget
 from core.widgets.services.codex_usage.codex_api import CodexUsageService
@@ -42,6 +44,19 @@ from core.widgets.services.codex_usage.sessions import (
 )
 
 _SESSION_STATES = (STATUS_WORKING, STATUS_WAITING, STATUS_IDLE)
+# The ring's level_colors keys (the Claude widget's names) for this widget's level classes.
+_LEVEL_COLOR_KEYS = {"good": "low", "low": "medium", "critical": "high"}
+
+
+def level_class(used: Any, warn: float, crit: float) -> str:
+    """Traffic light for a window's share used: good under warn, low from warn, critical from crit."""
+    if not isinstance(used, (int, float)):
+        return "unknown"
+    if used >= crit:
+        return "critical"
+    if used >= warn:
+        return "low"
+    return "good"
 
 
 class UsageBar(QFrame):
@@ -217,6 +232,9 @@ class CodexUsageWidget(BaseWidget):
         self._heatmap_history_note: QLabel | None = None
         self._model_widgets: list[dict[str, Any]] = []
         self._plan_label: QLabel | None = None
+        self._hearts: HeartsView | None = None
+        self._meta_account: QLabel | None = None
+        self._meta_updated: QLabel | None = None
         self._menu_title_label: QLabel | None = None
         self._refresh_button: RefreshButton | None = None
         self._refresh_status: QLabel | None = None
@@ -430,15 +448,8 @@ class CodexUsageWidget(BaseWidget):
             return f"{seconds // 60}m ago"
         return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
 
-    @staticmethod
-    def _level_class(remaining: Any) -> str:
-        if not isinstance(remaining, (int, float)):
-            return "unknown"
-        if remaining <= 20:
-            return "critical"
-        if remaining <= 50:
-            return "low"
-        return "good"
+    def _level(self, window: dict[str, Any]) -> str:
+        return level_class(window.get("used"), self.config.warn_percent, self.config.crit_percent)
 
     def _format_values(self) -> dict[str, str]:
         primary = self._window("primary")
@@ -555,6 +566,11 @@ class CodexUsageWidget(BaseWidget):
                 # Follow usage_mode so the ring never contradicts the number beside it.
                 key = "used" if self._usage_mode == "used" else "remaining"
                 self.progress_widget.set_value(self._percent_value(active_window.get(key)))
+                level_colors = self.config.progress_bar.level_colors
+                level = self._level(active_window)
+                if level_colors is not None and level in _LEVEL_COLOR_KEYS:
+                    # From the share used whichever way the ring runs, so red always means close.
+                    self.progress_widget.set_color(getattr(level_colors, _LEVEL_COLOR_KEYS[level]))
 
         if self.config.tooltip:
             primary = self._window("primary")
@@ -1216,6 +1232,9 @@ class CodexUsageWidget(BaseWidget):
         self._menu_title_label = title
         header_layout.addWidget(title_stack)
         header_layout.addStretch()
+        if self.config.hearts.enabled:
+            self._hearts = HeartsView(self.config.hearts.scale)
+            header_layout.addWidget(self._hearts, 0, Qt.AlignmentFlag.AlignVCenter)
         refresh_status = QLabel("")
         refresh_status.setProperty("class", "refresh-status")
         refresh_status.setVisible(False)
@@ -1236,6 +1255,8 @@ class CodexUsageWidget(BaseWidget):
         if self.config.sessions.enabled and self.config.sessions.show_in_menu:
             layout.addWidget(self._build_sessions_section())
         layout.addWidget(self._build_pager())
+        if self.config.footer.enabled:
+            layout.addWidget(self._build_meta_line())
 
         # Before the first measure: the indent it removes is part of each label's width.
         align_label_text(self._menu)
@@ -1392,7 +1413,7 @@ class CodexUsageWidget(BaseWidget):
             if not window:
                 continue
             remaining = window.get("remaining")
-            level = self._level_class(remaining)
+            level = self._level(window)
             # The fill follows usage_mode so it can never contradict the number beside it:
             # showing "4% used" against a nearly-full bar reads as two different facts.
             # The colour still tracks health (how much is left), not the number's magnitude.
@@ -1446,7 +1467,8 @@ class CodexUsageWidget(BaseWidget):
                 widgets["bar"].set_ratio(float(value) / model_maximum if model_maximum else 0)
 
         if is_valid_qobject(self._plan_label):
-            line = self._account_line()
+            # With the footer on, the account is part of its closing line instead.
+            line = "" if self.config.footer.enabled else self._account_line()
             self._plan_label.setText(line)
             self._plan_label.setVisible(bool(line))
             if line:
@@ -1464,6 +1486,10 @@ class CodexUsageWidget(BaseWidget):
             if "credits" in self._detail_names:
                 self._detail_names["credits"].setVisible(has_credits)
             self._detail_widgets["updated"].setText(self._fmt_updated(self._data.get("fetched_at")))
+            # The footer says when the numbers arrived, so the row would say it twice.
+            self._detail_widgets["updated"].setVisible(not self.config.footer.enabled)
+            if "updated" in self._detail_names:
+                self._detail_names["updated"].setVisible(not self.config.footer.enabled)
             self._detail_widgets["status"].setText("Cached" if stale else "Live")
             self._detail_widgets["status"].setProperty("class", f"value status {'stale' if stale else 'live'}")
             error = str(self._data.get("error") or "") if stale else ""
@@ -1471,5 +1497,72 @@ class CodexUsageWidget(BaseWidget):
             self._detail_widgets["error"].setVisible(bool(error))
             set_tooltip(self._detail_widgets["error"], error)
             refresh_widget_style(self._detail_widgets["status"], self._detail_widgets["error"])
+        self._sync_hearts()
+        self._sync_meta()
         self._sync_reset_credits()
         self._sync_pager()
+
+    def _sync_hearts(self) -> None:
+        """The header hearts follow the main window, whatever its length (a week on some plans)."""
+        if self._hearts is None:
+            return
+        primary = self._window("primary")
+        used = primary.get("used")
+        used = float(used) if isinstance(used, (int, float)) else None
+        try:
+            self._hearts.set_state(
+                heart_halves(used), percent=used, window=self._window_phrase(primary.get("duration_mins"))
+            )
+        except RuntimeError:
+            self._hearts = None
+
+    def _stale_after(self) -> int:
+        configured = self.config.footer.stale_after
+        if configured:
+            return configured
+        # Serving from cache is normal for up to cache_ttl, so stale starts past that.
+        return max(3 * self.config.update_interval, self.config.cache_ttl + 2 * self.config.update_interval)
+
+    def _build_meta_line(self) -> QFrame:
+        """Closing line: whose plan these numbers are, and how fresh they are."""
+        frame = QFrame()
+        frame.setProperty("class", "meta")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._meta_account = QLabel("")
+        self._meta_account.setProperty("class", "account")
+        layout.addWidget(self._meta_account)
+        layout.addStretch()
+        self._meta_updated = QLabel("")
+        self._meta_updated.setProperty("class", "updated")
+        self._meta_updated.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._meta_updated)
+        return frame
+
+    def _sync_meta(self) -> None:
+        if self._meta_account is None:
+            return
+        try:
+            footer = self.config.footer
+            plan = str(self._data.get("plan") or "").strip().lower() if footer.show_plan else ""
+            email = str(self._data.get("email") or "").strip() if self.config.show_account else ""
+            signed_out = self.config.show_account and not email
+            account_text = " · ".join(p for p in (plan, "not signed in" if signed_out else email) if p)
+            self._meta_account.setText(self._clip(account_text, 40))
+            self._meta_account.setProperty("class", "account signed-out" if signed_out else "account")
+            set_tooltip(self._meta_account, self._account_tooltip())
+
+            fetched_at = self._data.get("fetched_at")
+            if not isinstance(fetched_at, (int, float)) or fetched_at <= 0:
+                updated, stale = "no data yet", True
+            else:
+                stamp = datetime.fromtimestamp(fetched_at).strftime("%H:%M")
+                stale = bool(self._data.get("stale")) or time.time() - fetched_at > self._stale_after()
+                updated = f"stale · {stamp}" if stale else f"updated {stamp}"
+            self._meta_updated.setText(updated)
+            self._meta_updated.setProperty("class", "updated stale" if stale else "updated")
+            refresh_widget_style(self._meta_account, self._meta_updated)
+        except RuntimeError:
+            self._meta_account = None
+            self._meta_updated = None
