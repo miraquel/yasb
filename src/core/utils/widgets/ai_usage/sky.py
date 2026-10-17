@@ -1,6 +1,6 @@
-"""Clawd's sky: a Qt-free port of clawd-usage-winwidget's backdrop (``lib/sky.ps1``).
+"""The AI usage popups' sky: a Qt-free port of clawd-usage-winwidget's backdrop (``lib/sky.ps1``).
 
-A faint sky behind the 5-hour reading that follows the real sunrise and sunset. Its colour
+A faint sky behind the hero reading (and Clawd, or the Codex pet) that follows the real sunrise and sunset. Its colour
 moves through night, dawn, day and dusk, the sun travels an arc by day, and at night the moon
 shows its actual phase among twinkling stars. Weather adds clouds drifting with the wind, rain
 slanting with it, swaying snow that settles underfoot, fog bands and the odd lightning flash.
@@ -13,6 +13,7 @@ import math
 import random
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 Colour = tuple[int, int, int, int]  # (alpha, red, green, blue)
 Rect = tuple[float, float, float, float]
@@ -598,3 +599,16 @@ class Sky:
             self._flash -= 1
             if opacity > 0:
                 frame.sprites.append(Sprite("rects", ((0.0, 0.0, self._w, self._h),), FLASH, opacity))
+
+
+def apply_sky_settings(model: Sky, settings: Any, weather: dict[str, Any]) -> None:
+    """Hand the sky a widget's ``sky`` config and the latest weather reading (empty for none)."""
+    model.latitude, model.longitude = settings.latitude, settings.longitude
+    model.weather_enabled = settings.weather
+    model.weather = (
+        Weather(int(weather["code"]), float(weather["wind"]), weather.get("temp"), float(weather["fetched_at"]))
+        if weather
+        else None
+    )
+    model.force_phase = None if settings.preview_phase == "auto" else settings.preview_phase
+    model.force_weather = None if settings.preview_weather == "auto" else PREVIEW_CODES[settings.preview_weather]

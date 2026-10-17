@@ -8,6 +8,7 @@ import sys
 import unittest
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -15,12 +16,13 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from core.utils.widgets.claude_usage import sky  # noqa: E402
-from core.utils.widgets.claude_usage.sky import (  # noqa: E402
+from core.utils.widgets.ai_usage import sky  # noqa: E402
+from core.utils.widgets.ai_usage.sky import (  # noqa: E402
     MOON_LIT,
     STAR,
     Sky,
     Weather,
+    apply_sky_settings,
     arc_point,
     moon_age,
     moon_rows,
@@ -28,7 +30,7 @@ from core.utils.widgets.claude_usage.sky import (  # noqa: E402
     sun_times,
     weather_kind,
 )
-from core.widgets.services.claude_usage.weather import met_no_code, parse_met_no, parse_open_meteo  # noqa: E402
+from core.widgets.services.ai_usage.weather import met_no_code, parse_met_no, parse_open_meteo  # noqa: E402
 
 JAKARTA = timezone(timedelta(hours=7))
 RAJEG = (-6.1783, 106.6319)
@@ -219,6 +221,30 @@ class SkyTests(unittest.TestCase):
         self.assertEqual(s.describe(at(12), clock)[0], "weather: no data")
         s.latitude = s.longitude = None
         self.assertEqual(s.describe(at(12), clock), ["sunrise 07:00 · sunset 19:00 (no location set)"])
+
+
+class ApplySkySettingsTest(unittest.TestCase):
+    def test_settings_and_weather_reach_the_model(self):
+        model = sky.Sky(random.Random(1))
+        settings = SimpleNamespace(
+            latitude=-6.18, longitude=106.63, weather=True, preview_phase="auto", preview_weather="rain"
+        )
+        apply_sky_settings(model, settings, {"code": 3, "wind": 2.0, "temp": 30.0, "fetched_at": 1000.0})
+        self.assertEqual((model.latitude, model.longitude), (-6.18, 106.63))
+        self.assertEqual(model.weather, sky.Weather(3, 2.0, 30.0, 1000.0))
+        self.assertIsNone(model.force_phase)
+        self.assertEqual(model.force_weather, sky.PREVIEW_CODES["rain"])
+
+    def test_no_weather_clears_it(self):
+        model = sky.Sky(random.Random(1))
+        settings = SimpleNamespace(
+            latitude=None, longitude=None, weather=False, preview_phase="night", preview_weather="auto"
+        )
+        apply_sky_settings(model, settings, {})
+        self.assertIsNone(model.weather)
+        self.assertFalse(model.weather_enabled)
+        self.assertEqual(model.force_phase, "night")
+        self.assertIsNone(model.force_weather)
 
 
 if __name__ == "__main__":

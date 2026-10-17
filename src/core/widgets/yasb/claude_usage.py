@@ -24,11 +24,14 @@ from core.utils.utilities import (
     build_progress_widget,
     refresh_widget_style,
 )
-from core.utils.widgets.claude_usage.clawd import Frame, heart_halves
-from core.utils.widgets.claude_usage.clawd_scene import ClawdScene, HeartsView, SkyScene
-from core.utils.widgets.claude_usage.sky import PREVIEW_CODES, Weather
+from core.utils.widgets.ai_usage.hearts import heart_halves
+from core.utils.widgets.ai_usage.scene import HeartsView, SkyScene
+from core.utils.widgets.ai_usage.sky import apply_sky_settings
+from core.utils.widgets.claude_usage.clawd import Frame
+from core.utils.widgets.claude_usage.clawd_scene import ClawdScene
 from core.validation.widgets.yasb.claude_usage import ClaudeUsageConfig
 from core.widgets.base import BaseWidget
+from core.widgets.services.ai_usage.weather import SkyWeatherService
 from core.widgets.services.claude_usage.claude_api import ClaudeUsageService, read_account, read_plan
 from core.widgets.services.claude_usage.sessions import (
     STATUS_IDLE,
@@ -39,7 +42,6 @@ from core.widgets.services.claude_usage.sessions import (
 )
 from core.widgets.services.claude_usage.status import STATUS_LEVELS, ClaudeStatusService
 from core.widgets.services.claude_usage.token_history import TokenHistoryService, summarize
-from core.widgets.services.claude_usage.weather import SkyWeatherService
 
 logger = logging.getLogger("claude_usage")
 
@@ -313,16 +315,8 @@ class ClaudeUsageWidget(BaseWidget):
         """Hand the sky its location, the latest weather and any preview, and word its tooltip."""
         if self._sky is None:
             return
-        sky = self.config.sky
         model = self._sky.model
-        model.latitude, model.longitude = sky.latitude, sky.longitude
-        model.weather_enabled = sky.weather
-        wx = self._weather
-        model.weather = (
-            Weather(int(wx["code"]), float(wx["wind"]), wx.get("temp"), float(wx["fetched_at"])) if wx else None
-        )
-        model.force_phase = None if sky.preview_phase == "auto" else sky.preview_phase
-        model.force_weather = None if sky.preview_weather == "auto" else PREVIEW_CODES[sky.preview_weather]
+        apply_sky_settings(model, self.config.sky, self._weather)
         tip = "\n".join(model.describe(datetime.now().astimezone(), self._clock_minutes))
         try:
             # Clawd covers most of the sky, so his tooltip carries it; without him the sky has its own.
