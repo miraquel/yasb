@@ -29,6 +29,12 @@ extra configuration is required as long as you are signed in to Claude Code.
 | `status`          | dict    | `{'enabled': false, ...}` | Optional Claude API status indicator. See [API status](#api-status). |
 | `progress_bar`    | dict    | `{'enabled': false, ...}` | Optional progress bar on the bar itself. See [Progress bar](#progress-bar). |
 | `tooltip`         | boolean | `true` | Whether to show a summary tooltip on hover. |
+| `warn_percent`    | integer | `60` | Utilization at which bars, percentages and the ring turn from `low` to `medium` (green to yellow). |
+| `crit_percent`    | integer | `85` | Utilization at which they turn `high` (red). Also where Clawd starts sweating. |
+| `clawd`           | dict    | `{'enabled': false, 'scale': 1.35}` | Clawd the crab in the popup. See [Clawd, sessions, hearts and footer](#clawd-sessions-hearts-and-footer). |
+| `sessions`        | dict    | `{'enabled': false, ...}` | Live Claude Code sessions. See [Clawd, sessions, hearts and footer](#clawd-sessions-hearts-and-footer). |
+| `hearts`          | dict    | `{'enabled': false, 'scale': 1.35}` | Pixel hearts in the popup header for what is left of the 5-hour window. |
+| `footer`          | dict    | `{'enabled': false, 'show_plan': true, 'stale_after': 0}` | Closing line with plan, account and data freshness. |
 | `callbacks`       | dict    | `{'on_left': 'toggle_menu', 'on_middle': 'do_nothing', 'on_right': 'toggle_label'}` | Mouse-click callbacks. |
 | `menu`            | dict    | `{'blur': true, 'round_corners': true, 'round_corners_type': 'normal', 'border_color': 'System', 'alignment': 'right', 'direction': 'down', 'offset_top': 6, 'offset_left': 0, 'pin_icon': '', 'unpin_icon': ''}` | Popup menu settings. |
 
@@ -59,6 +65,15 @@ following placeholders can be used in `label` / `label_alt`:
   `.status.<none|minor|major|critical>` classes. Place it in its own `<span>`. Requires
   `status.enabled`; empty otherwise.
 - `{status_text}` - the status description (e.g. `All Systems Operational`).
+- `{sessions_badge}` - working and waiting Claude Code sessions in one compact string (e.g.
+  `▶2 ?1`), empty when nothing is working or waiting. Its label gets a `.working` / `.waiting` /
+  `.idle` class for the most pressing state, so place it in its own `<span>`. Requires
+  `sessions.enabled` or `clawd.enabled`.
+- `{sessions_total}` `{sessions_working}` `{sessions_waiting}` `{sessions_idle}` - the counts.
+- `{hearts}` - the 5-hour hearts as Nerd Font glyphs (full / half / empty heart).
+
+Labels containing `{five_hour...}` or `{hearts}` also get a `.low` / `.medium` / `.high` class
+from `warn_percent` / `crit_percent`.
 
 ```yaml
 claude_usage:
@@ -224,6 +239,57 @@ bar is the inverse, because that widget reports remaining rather than used.)
 - **radius:** Corner radius, for the linear types only.
 - **color:** A single colour, or a list of colours for a gradient.
 - **animation:** Animate value changes rather than jumping.
+- **level_colors:** Optional `low` / `medium` / `high` colours. When set, the ring switches
+  between them at `warn_percent` / `crit_percent` (a traffic light) instead of keeping `color`.
+
+## Clawd, sessions, hearts and footer
+
+A port of the look of [clawd-usage-winwidget](https://github.com/Enhed/clawd-usage-winwidget)
+(MIT). Each part is off by default and can be turned on on its own.
+
+```yaml
+    warn_percent: 60
+    crit_percent: 85
+    clawd:
+      enabled: true
+      scale: 1.35          # size of one of his pixels; 0.6-4.0
+    sessions:
+      enabled: true
+      show_in_menu: true
+      max_rows: 6          # rows listed; the rest collapse into "+N more"
+      poll_interval: 2     # seconds between registry scans (1-60)
+      dirs: []             # Claude config dirs to watch; empty = every ~/.claude* dir
+    hearts:
+      enabled: true
+    footer:
+      enabled: true
+      show_plan: true
+      stale_after: 0       # seconds; 0 = past cache_ttl + 2 x update_interval
+```
+
+- **clawd:** Clawd, the crab from Claude Code's welcome screen, lives beside the 5-hour reading
+  with the same block-glyph body and click animations. With no session running he burrows into
+  the sand and sleeps; with sessions idle he wanders and whistles (and dozes after ten quiet
+  minutes); while one works he runs edge to edge; while one waits for you he hops under a `?`;
+  near `crit_percent` he sweats, and at 100% he lies legs-up. He jumps when a session finishes
+  its reply, celebrates with confetti when the 5-hour window resets, and does a random trick
+  when clicked. He animates only while the popup is open.
+- **sessions:** Live sessions from Claude Code's own registry (`<config dir>/sessions/<pid>.json`).
+  A file only counts while its process is alive and started when the file says it did, so a
+  closed session never lingers. Every `~/.claude*` directory is scanned by default, so a
+  machine running several accounts side by side counts all of them. The popup lists them,
+  waiting ones first, under a summary like `4 open · 1 working`.
+- **hearts:** Three hearts in the header, tamagotchi-style: every half heart is about 16.7% of
+  the 5-hour window left, and they empty only at 100%. They beat when nearly out.
+- **footer:** A closing line with the plan (read from `subscriptionType` in
+  `.credentials.json` - never the token) and the account, and on the right when the numbers
+  last arrived, which turns into `stale · 10:41` once they stop arriving. With the footer on,
+  the account moves out of the header into it. Signed out shows in red.
+
+Clawd and the hearts are painted rather than styled, so their colours come from
+`-qproperty-*` on `.claude-usage-menu .clawd` (`bodycolor`, `eyecolor`, `fxcolor`, `sandcolor`,
+`sweatcolor`, `dustcolor`, `zzzcolor`, `lovecolor`, `soulcolor`, `askcolor`, `cheercolor`,
+`notecolor`) and `.claude-usage-menu .header .hearts` (`heartcolor`, `emptycolor`).
 
 > The bar hides itself when the tracked window has no value yet (e.g. before the first
 > successful fetch), so it never shows a misleading empty ring.

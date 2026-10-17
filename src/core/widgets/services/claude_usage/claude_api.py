@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import time
 import urllib.request
 from typing import Any, ClassVar
@@ -98,6 +99,36 @@ def read_account() -> dict[str, str]:
         if email or name:
             return {"email": email, "name": name, "organization": organization}
     return {"email": "", "name": "", "organization": ""}
+
+
+_PLAN_NAMES = {"max": "Max", "pro": "Pro", "team": "Team", "enterprise": "Enterprise", "free": "Free"}
+
+
+def plan_name(subscription: str, rate_limit_tier: str = "") -> str:
+    """Display name for a subscription type, e.g. 'pro' -> 'Pro', 'max' + '..._max_5x' -> 'Max 5x'."""
+    subscription = subscription.strip().lower()
+    if not subscription:
+        return ""
+    name = _PLAN_NAMES.get(subscription, subscription.capitalize())
+    multiplier = re.search(r"max_(\d+)x", rate_limit_tier or "")
+    if subscription == "max" and multiplier:
+        name += f" {multiplier.group(1)}x"
+    return name
+
+
+def read_plan() -> str:
+    """The signed-in plan ('Pro', 'Max 5x', 'Team'), or '' when signed out or unreadable.
+
+    Claude Code stores the plan beside the OAuth token in ``.credentials.json``; only the
+    ``subscriptionType`` and ``rateLimitTier`` fields are read here, never the token.
+    """
+    try:
+        cred_path = os.path.join(_claude_config_dir(), ".credentials.json")
+        with open(cred_path, encoding="utf-8") as f:
+            oauth = json.load(f).get("claudeAiOauth") or {}
+        return plan_name(str(oauth.get("subscriptionType") or ""), str(oauth.get("rateLimitTier") or ""))
+    except Exception:
+        return ""
 
 
 def _cache_path() -> str:
