@@ -79,6 +79,36 @@ class ClaudeClawdConfig(CustomBaseModel):
     scale: float = Field(default=1.35, ge=0.6, le=4.0)
 
 
+class ClaudeSkyConfig(CustomBaseModel):
+    # The sky behind the 5-hour reading and Clawd: night, dawn, day and dusk from the real
+    # sunrise and sunset, the sun and the moon in its actual phase, and live weather.
+    enabled: bool = False
+    # Where you are, in decimal degrees. Without both the sky still follows the clock, with
+    # a 07:00 sunrise and 19:00 sunset and no weather. Never looked up by IP.
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    # Clouds, rain, snow, fog and storms from Open-Meteo (met.no if it is blocked); no key.
+    weather: bool = True
+    weather_interval: int = Field(default=900, ge=300, le=86400)
+    # Hold one time of day or one weather, to see what it looks like; "auto" follows the
+    # clock and the live weather.
+    preview_phase: Literal["auto", "dawn", "day", "dusk", "night"] = "auto"
+    preview_weather: Literal[
+        "auto",
+        "clear",
+        "mostly_clear",
+        "partly",
+        "overcast",
+        "fog",
+        "drizzle",
+        "rain",
+        "showers",
+        "snow",
+        "snow_showers",
+        "storm",
+    ] = "auto"
+
+
 class ClaudeSessionsConfig(CustomBaseModel):
     # Live Claude Code sessions (working / waiting / idle), from Claude Code's own registry.
     enabled: bool = False
@@ -143,6 +173,7 @@ class ClaudeUsageConfig(CustomBaseModel):
     warn_percent: int = Field(default=60, ge=1, le=100)
     crit_percent: int = Field(default=85, ge=1, le=100)
     clawd: ClaudeClawdConfig = ClaudeClawdConfig()
+    sky: ClaudeSkyConfig = ClaudeSkyConfig()
     sessions: ClaudeSessionsConfig = ClaudeSessionsConfig()
     hearts: ClaudeHeartsConfig = ClaudeHeartsConfig()
     footer: ClaudeFooterConfig = ClaudeFooterConfig()

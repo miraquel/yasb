@@ -32,6 +32,7 @@ extra configuration is required as long as you are signed in to Claude Code.
 | `warn_percent`    | integer | `60` | Utilization at which bars, percentages and the ring turn from `low` to `medium` (green to yellow). |
 | `crit_percent`    | integer | `85` | Utilization at which they turn `high` (red). Also where Clawd starts sweating. |
 | `clawd`           | dict    | `{'enabled': false, 'scale': 1.35}` | Clawd the crab in the popup. See [Clawd, sessions, hearts and footer](#clawd-sessions-hearts-and-footer). |
+| `sky`             | dict    | `{'enabled': false, ...}` | The sky behind the 5-hour reading and Clawd: time of day and live weather. See [Clawd, sessions, hearts and footer](#clawd-sessions-hearts-and-footer). |
 | `sessions`        | dict    | `{'enabled': false, ...}` | Live Claude Code sessions. See [Clawd, sessions, hearts and footer](#clawd-sessions-hearts-and-footer). |
 | `hearts`          | dict    | `{'enabled': false, 'scale': 1.35}` | Pixel hearts in the popup header for what is left of the 5-hour window. |
 | `footer`          | dict    | `{'enabled': false, 'show_plan': true, 'stale_after': 0}` | Closing line with plan, account and data freshness. |
@@ -253,6 +254,14 @@ A port of the look of [clawd-usage-winwidget](https://github.com/Enhed/clawd-usa
     clawd:
       enabled: true
       scale: 1.35          # size of one of his pixels; 0.6-4.0
+    sky:
+      enabled: true
+      latitude: -6.1783    # decimal degrees; without both, the sky follows the clock only
+      longitude: 106.6319
+      weather: true        # live weather from Open-Meteo (met.no if blocked); no key
+      weather_interval: 900  # seconds between weather fetches (300-86400)
+      preview_phase: auto    # or dawn / day / dusk / night, to hold one time of day
+      preview_weather: auto  # or clear / partly / overcast / fog / rain / showers / snow / storm ...
     sessions:
       enabled: true
       show_in_menu: true
@@ -274,6 +283,17 @@ A port of the look of [clawd-usage-winwidget](https://github.com/Enhed/clawd-usa
   near `crit_percent` he sweats, and at 100% he lies legs-up. He jumps when a session finishes
   its reply, celebrates with confetti when the 5-hour window resets, and does a random trick
   when clicked. He animates only while the popup is open.
+- **sky:** A faint sky behind the reading and Clawd that fades into the panel at both sides. It
+  follows the real sunrise and sunset for `latitude`/`longitude`, worked out locally: night,
+  dawn, day and dusk blend into each other, the sun travels an arc and turns orange near the
+  horizon, and at night the moon shows its actual phase (mirrored south of the equator) among
+  twinkling stars. With `weather` on, clouds drift with the wind, rain slants with it, snow
+  sways and settles underfoot, fog crawls past and storms flash now and then. A reading older
+  than three hours is dropped rather than shown. Hovering Clawd adds the temperature, the
+  weather, the wind and today's sunrise and sunset to his tooltip. The location is never looked
+  up by IP: only the coordinates you set are sent, and only to the weather service. It works
+  without Clawd too, and animates only while the popup is open. `preview_phase` and
+  `preview_weather` hold one look in place, so you can see it without waiting for the weather.
 - **sessions:** Live sessions from Claude Code's own registry (`<config dir>/sessions/<pid>.json`).
   A file only counts while its process is alive and started when the file says it did, so a
   closed session never lingers. Every `~/.claude*` directory is scanned by default, so a
@@ -290,6 +310,11 @@ Clawd and the hearts are painted rather than styled, so their colours come from
 `-qproperty-*` on `.claude-usage-menu .clawd` (`bodycolor`, `eyecolor`, `fxcolor`, `sandcolor`,
 `sweatcolor`, `dustcolor`, `zzzcolor`, `lovecolor`, `soulcolor`, `askcolor`, `cheercolor`,
 `notecolor`) and `.claude-usage-menu .header .hearts` (`heartcolor`, `emptycolor`).
+
+The sky keeps the original's palette, and `.claude-usage-menu .sky` tunes it in whole
+percentages: `-qproperty-strength` (the gradient, default `100`), `-qproperty-fxopacity` (sun,
+moon, clouds and weather, default `70`) and `-qproperty-edgefade` (how much of each side fades
+into the panel, default `10`).
 
 > The bar hides itself when the tracked window has no value yet (e.g. before the first
 > successful fetch), so it never shows a misleading empty ring.

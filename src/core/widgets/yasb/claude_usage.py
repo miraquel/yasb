@@ -25,7 +25,8 @@ from core.utils.utilities import (
     refresh_widget_style,
 )
 from core.utils.widgets.claude_usage.clawd import Frame, heart_halves
-from core.utils.widgets.claude_usage.clawd_scene import ClawdScene, HeartsView
+from core.utils.widgets.claude_usage.clawd_scene import ClawdScene, HeartsView, SkyScene
+from core.utils.widgets.claude_usage.sky import PREVIEW_CODES, Weather
 from core.validation.widgets.yasb.claude_usage import ClaudeUsageConfig
 from core.widgets.base import BaseWidget
 from core.widgets.services.claude_usage.claude_api import ClaudeUsageService, read_account, read_plan
@@ -38,6 +39,7 @@ from core.widgets.services.claude_usage.sessions import (
 )
 from core.widgets.services.claude_usage.status import STATUS_LEVELS, ClaudeStatusService
 from core.widgets.services.claude_usage.token_history import TokenHistoryService, summarize
+from core.widgets.services.claude_usage.weather import SkyWeatherService
 
 logger = logging.getLogger("claude_usage")
 
@@ -168,8 +170,17 @@ class ClaudeUsageWidget(BaseWidget):
             )
             self._sessions = self._sessions_service.latest()
 
+        # Weather for the sky (optional): fetched only for configured coordinates, never guessed.
+        sky = self.config.sky
+        self._weather_service: SkyWeatherService | None = None
+        self._weather: dict[str, Any] = {}
+        if sky.enabled and sky.weather and sky.latitude is not None and sky.longitude is not None:
+            self._weather_service = SkyWeatherService.get_instance(sky.latitude, sky.longitude, sky.weather_interval)
+            self._weather = self._weather_service.latest()
+
         # Built with the popup; None until it first opens.
         self._clawd: ClawdScene | None = None
+        self._sky: SkyScene | None = None
         self._hearts: HeartsView | None = None
         self._meta_account: QLabel | None = None
         self._meta_updated: QLabel | None = None
@@ -198,6 +209,8 @@ class ClaudeUsageWidget(BaseWidget):
             self._status_service.data_ready.connect(self._on_status_data)
         if self._sessions_service is not None:
             self._sessions_service.data_ready.connect(self._on_sessions_data)
+        if self._weather_service is not None:
+            self._weather_service.data_ready.connect(self._on_weather_data)
         self.destroyed.connect(lambda *_: self._release_service())
         self._update_label()
 
@@ -222,6 +235,11 @@ class ClaudeUsageWidget(BaseWidget):
         if self._sessions_service is not None:
             try:
                 self._sessions_service.release()
+            except RuntimeError:
+                pass
+        if self._weather_service is not None:
+            try:
+                self._weather_service.release()
             except RuntimeError:
                 pass
 
@@ -282,6 +300,38 @@ class ClaudeUsageWidget(BaseWidget):
                 )
             except RuntimeError:
                 self._clawd = None
+
+    def _on_weather_data(self, data: dict[str, Any]) -> None:
+        self._weather = data
+        self._feed_sky()
+
+    def _clock_minutes(self, minutes: float) -> str:
+        m = round(minutes) % 1440
+        return self._clock(datetime(2000, 1, 1, m // 60, m % 60))
+
+    def _feed_sky(self) -> None:
+        """Hand the sky its location, the latest weather and any preview, and word its tooltip."""
+        if self._sky is None:
+            return
+        sky = self.config.sky
+        model = self._sky.model
+        model.latitude, model.longitude = sky.latitude, sky.longitude
+        model.weather_enabled = sky.weather
+        wx = self._weather
+        model.weather = (
+            Weather(int(wx["code"]), float(wx["wind"]), wx.get("temp"), float(wx["fetched_at"])) if wx else None
+        )
+        model.force_phase = None if sky.preview_phase == "auto" else sky.preview_phase
+        model.force_weather = None if sky.preview_weather == "auto" else PREVIEW_CODES[sky.preview_weather]
+        tip = "\n".join(model.describe(datetime.now().astimezone(), self._clock_minutes))
+        try:
+            # Clawd covers most of the sky, so his tooltip carries it; without him the sky has its own.
+            if self._clawd is not None:
+                self._clawd.set_tip_extra(tip)
+            else:
+                self._sky.set_tip(tip)
+        except RuntimeError:
+            self._sky = None
 
     def _on_clawd_step(self, frame: Frame) -> None:
         # While Clawd animates, the hearts follow his frame: the lost half blinks, and they
@@ -725,6 +775,7 @@ class ClaudeUsageWidget(BaseWidget):
             self._build_menu()
         # Before show(): Clawd picks his entrance when he first appears, from these inputs.
         self._feed_clawd()
+        self._feed_sky()
         self._menu.setPosition(
             alignment=self.config.menu.alignment,
             direction=self.config.menu.direction,
@@ -1078,11 +1129,15 @@ class ClaudeUsageWidget(BaseWidget):
         caption = QLabel("of your 5-hour window")
         caption.setProperty("class", "hero-caption")
 
-        if self.config.clawd.enabled:
+        if self.config.clawd.enabled or self.config.sky.enabled:
             # Clawd lives beside the reading, on the same ground line as its caption, as in
-            # the original widget's top row.
-            top = QFrame()
-            top.setProperty("class", "hero-top")
+            # the original widget's top row, and the sky spans the two of them from behind.
+            if self.config.sky.enabled:
+                self._sky = SkyScene(self.config.clawd.scale)
+                top = self._sky
+            else:
+                top = QFrame()
+                top.setProperty("class", "hero-top")
             top_layout = QHBoxLayout(top)
             top_layout.setContentsMargins(0, 0, 0, 0)
             top_layout.setSpacing(0)
@@ -1094,10 +1149,14 @@ class ClaudeUsageWidget(BaseWidget):
             reading_layout.addWidget(value_label, 0, Qt.AlignmentFlag.AlignLeft)
             reading_layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
             top_layout.addWidget(reading, 0, Qt.AlignmentFlag.AlignBottom)
-            self._clawd = ClawdScene(self.config.clawd.scale, self.config.crit_percent)
-            self._clawd.stepped.connect(self._on_clawd_step)
-            top_layout.addWidget(self._clawd, 1, Qt.AlignmentFlag.AlignBottom)
+            if self.config.clawd.enabled:
+                self._clawd = ClawdScene(self.config.clawd.scale, self.config.crit_percent)
+                self._clawd.stepped.connect(self._on_clawd_step)
+                top_layout.addWidget(self._clawd, 1, Qt.AlignmentFlag.AlignBottom)
+            else:
+                top_layout.addStretch(1)
             layout.addWidget(top)
+            self._feed_sky()
         else:
             layout.addWidget(value_label, 0, Qt.AlignmentFlag.AlignLeft)
             layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
