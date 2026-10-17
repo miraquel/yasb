@@ -81,6 +81,8 @@ codex_usage:
 | `mode_label_remaining` | string | `left` | The word `{mode}` renders while showing remaining. |
 | `warn_percent` | integer | `50` | Share used from which the bars, percentages and ring turn from good to low (1-100). |
 | `crit_percent` | integer | `80` | Share used from which they turn critical (1-100). The defaults keep the original split: 50% and 20% left. |
+| `pet` | dictionary | `{'enabled': false, 'scale': 1.35}` | The Codex pet in the popup. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
+| `sky` | dictionary | `{'enabled': false, ...}` | The sky behind the main reading and the pet, with the Claude widget's options. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
 | `sessions` | dictionary | `{'enabled': false, ...}` | Live Codex sessions. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
 | `hearts` | dictionary | `{'enabled': false, 'scale': 1.35}` | Pixel hearts in the popup header. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
 | `footer` | dictionary | `{'enabled': false, ...}` | Plan, account and freshness line closing the popup. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
@@ -564,6 +566,16 @@ The same extras as the Claude widget's Clawd section, for Codex. Each part is of
 can be turned on on its own.
 
 ```yaml
+    warn_percent: 60
+    crit_percent: 85
+    pet:
+      enabled: true
+      scale: 1.35          # size of one of its pixels, on Clawd's scale; 0.6-4.0
+    sky:
+      enabled: true
+      latitude: -6.1783    # decimal degrees; without both, the sky follows the clock only
+      longitude: 106.6319
+      weather: true        # live weather from Open-Meteo (met.no if blocked); no key
     sessions:
       enabled: true
       show_in_menu: true
@@ -578,6 +590,18 @@ can be turned on on its own.
       stale_after: 0       # seconds; 0 = past cache_ttl + 2 x update_interval
 ```
 
+- **pet:** The default Codex pet - a blue cloud whose face is a little screen showing `>_` -
+  redrawn by hand in pixels at Clawd's width, lives beside the main reading. With no Codex
+  session open it sleeps, eyes shut and its face dimmed; with sessions idle it blinks, strolls
+  across the strip now and then and looks at your cursor; while Codex works it types on its
+  laptop; while Codex waits for your approval it hops under a `?` (needs the optional hook
+  below). It jumps when a turn finishes, droops with an `x` face for a few seconds when one fails
+  or is interrupted, stays drooped once the main window is used up, and waves when clicked. It
+  animates only while the popup is open. Its strip is taller than Clawd's (the pet is about
+  twice his height), so the hero row grows by about 30 px at the default scale. The pet's moods
+  come from the sessions below, which are read even with the list itself turned off.
+- **sky:** The Claude widget's sky (see its docs for what it shows), behind the reading and the
+  pet, with the same options. Hovering the pet adds the weather to its tooltip.
 - **sessions:** Live sessions read from Codex's own files, read-only and with no network: a
   chat counts while a Codex process holds its lock in `~/.codex/thread-writer-locks`, so a
   closed or crashed one never lingers. It is *working* while its newest turn runs, *waiting*
@@ -596,9 +620,18 @@ can be turned on on its own.
   refresh fails. With the footer on, the account moves out of the header and the Overview page
   drops its `Updated` row. Signed out shows as `not signed in` with the `signed-out` class.
 
+The pet is painted rather than styled, so its colours come from `-qproperty-*` on
+`.codex-usage-menu .codex-pet`: `bodycolor` (default `#5478E6`), `screencolor` (`#181C46`),
+`facecolor` (`#8CF0F5`, the `>_` and chest light) and `askcolor` (`#FBBF24`, the `?`). The sky
+takes `-qproperty-strength`, `-qproperty-fxopacity` and `-qproperty-edgefade` on
+`.codex-usage-menu .sky`, as on the Claude widget.
+
 The sessions section and the footer use the Claude popup's classes, so their rules can be shared:
 
 ```css
+.codex-usage-menu .hero-top {}                           /* the reading and the pet; also .sky */
+.codex-usage-menu .hero-reading {}
+.codex-usage-menu .codex-pet {}
 .codex-usage-menu .section.sessions {}
 .codex-usage-menu .section.sessions .title-row .title {}
 .codex-usage-menu .section.sessions .title-row .summary {}

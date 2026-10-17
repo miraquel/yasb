@@ -30,9 +30,12 @@ from core.utils.utilities import (
     refresh_widget_style,
 )
 from core.utils.widgets.ai_usage.hearts import heart_halves
-from core.utils.widgets.ai_usage.scene import HeartsView
+from core.utils.widgets.ai_usage.scene import HeartsView, SkyScene
+from core.utils.widgets.ai_usage.sky import apply_sky_settings
+from core.utils.widgets.codex_usage.codex_pet_scene import CodexPetScene
 from core.validation.widgets.yasb.codex_usage import CodexUsageConfig
 from core.widgets.base import BaseWidget
+from core.widgets.services.ai_usage.weather import SkyWeatherService
 from core.widgets.services.codex_usage.codex_api import CodexUsageService
 from core.widgets.services.codex_usage.sessions import (
     STATUS_IDLE,
@@ -254,7 +257,8 @@ class CodexUsageWidget(BaseWidget):
         )
         self._data: dict[str, Any] = self._service.latest()
 
-        # Live Codex sessions (optional), from Codex's own files.
+        # Live Codex sessions (optional), from Codex's own files. The pet's moods come from
+        # these, so it polls them even when the list itself is off.
         self._sessions_service: CodexSessionsService | None = None
         self._sessions: list[dict[str, Any]] = []
         # Turns that ended since the pet last looked: "finished" / "failed".
@@ -262,11 +266,22 @@ class CodexUsageWidget(BaseWidget):
         self._session_summary: QLabel | None = None
         self._session_rows: QFrame | None = None
         self._session_layout: QGridLayout | None = None
-        if self.config.sessions.enabled:
+        if self.config.sessions.enabled or self.config.pet.enabled:
             self._sessions_service = CodexSessionsService.get_instance(
                 self.config.sessions.poll_interval, self.config.sessions.idle_minutes
             )
             self._sessions = self._sessions_service.latest()
+
+        # Weather for the sky (optional): fetched only for configured coordinates, never guessed.
+        sky = self.config.sky
+        self._weather_service: SkyWeatherService | None = None
+        self._weather: dict[str, Any] = {}
+        if sky.enabled and sky.weather and sky.latitude is not None and sky.longitude is not None:
+            self._weather_service = SkyWeatherService.get_instance(sky.latitude, sky.longitude, sky.weather_interval)
+            self._weather = self._weather_service.latest()
+        # Built with the popup; None until it first opens.
+        self._pet: CodexPetScene | None = None
+        self._sky: SkyScene | None = None
 
         self.progress_widget = build_progress_widget(self, self.config.progress_bar.model_dump())
         self._init_container()
@@ -286,6 +301,8 @@ class CodexUsageWidget(BaseWidget):
         self._service.data_ready.connect(self._on_data)
         if self._sessions_service is not None:
             self._sessions_service.data_ready.connect(self._on_sessions_data)
+        if self._weather_service is not None:
+            self._weather_service.data_ready.connect(self._on_weather_data)
         self.destroyed.connect(lambda *_: self._release_service())
         self._update_label()
 
@@ -306,6 +323,11 @@ class CodexUsageWidget(BaseWidget):
                 self._sessions_service.release()
             except RuntimeError:
                 pass
+        if self._weather_service is not None:
+            try:
+                self._weather_service.release()
+            except RuntimeError:
+                pass
 
     def _refresh(self) -> None:
         if is_valid_qobject(self._menu) and self._menu.isVisible() and is_valid_qobject(self._refresh_button):
@@ -322,6 +344,7 @@ class CodexUsageWidget(BaseWidget):
         self._data = data
         self._update_label()
         self._sync_menu()
+        self._feed_pet()
         self._finish_refresh_feedback(not data.get("stale"))
 
     def _on_sessions_data(self, sessions: list[dict[str, Any]]) -> None:
@@ -329,7 +352,53 @@ class CodexUsageWidget(BaseWidget):
         self._pending_events = (self._pending_events + turn_events(self._sessions, sessions))[-8:]
         self._sessions = sessions
         self._update_label()
+        self._feed_pet()
         self._sync_sessions_section()
+
+    def _feed_pet(self) -> None:
+        """Hand the pet the latest sessions, the main window's share used and the turns that ended."""
+        if self._pet is None:
+            # No popup yet: a reaction to a turn that ended long before it opens would be noise.
+            self._pending_events.clear()
+            return
+        used = self._window("primary").get("used")
+        counts = count_sessions(self._sessions)
+        events, self._pending_events = self._pending_events, []
+        try:
+            self._pet.set_inputs(
+                float(used) if isinstance(used, (int, float)) else None,
+                counts[STATUS_WORKING],
+                counts[STATUS_WAITING],
+                counts["total"],
+                events,
+            )
+        except RuntimeError:
+            self._pet = None
+
+    def _on_weather_data(self, data: dict[str, Any]) -> None:
+        self._weather = data
+        self._feed_sky()
+
+    @staticmethod
+    def _clock_minutes(minutes: float) -> str:
+        m = round(minutes) % 1440
+        return f"{m // 60:02d}:{m % 60:02d}"
+
+    def _feed_sky(self) -> None:
+        """Hand the sky its settings and the latest weather, and word its tooltip."""
+        if self._sky is None:
+            return
+        try:
+            model = self._sky.model
+            apply_sky_settings(model, self.config.sky, self._weather)
+            tip = "\n".join(model.describe(datetime.now().astimezone(), self._clock_minutes))
+            # The pet covers part of the sky, so its tooltip carries it; without it the sky has its own.
+            if self._pet is not None:
+                self._pet.set_tip_extra(tip)
+            else:
+                self._sky.set_tip(tip)
+        except RuntimeError:
+            self._sky = None
 
     def _session_values(self) -> dict[str, str]:
         counts = count_sessions(self._sessions)
@@ -607,6 +676,9 @@ class CodexUsageWidget(BaseWidget):
             self._build_menu()
         self._sync_menu()
         self._sync_sessions_section()
+        # Before show(): the pet's first frame comes from these inputs.
+        self._feed_pet()
+        self._feed_sky()
         self._menu.adjustSize()
         self._menu.setPosition(
             alignment=self.config.menu.alignment,
@@ -656,13 +728,41 @@ class CodexUsageWidget(BaseWidget):
 
         value = QLabel("--%")
         value.setProperty("class", "hero-value unknown")
-        layout.addWidget(value, 0, Qt.AlignmentFlag.AlignLeft)
 
         # A sentence rather than a chip: it has to carry both which window this is and which
         # way the number reads, and a chip repeating the window name would say half of that.
         caption = QLabel("")
         caption.setProperty("class", "hero-caption")
-        layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
+
+        if self.config.pet.enabled or self.config.sky.enabled:
+            # The pet lives beside the reading, on the same ground line as its caption, as Clawd
+            # does in the Claude popup, and the sky spans the two of them from behind.
+            if self.config.sky.enabled:
+                self._sky = SkyScene(self.config.pet.scale)
+                top = self._sky
+            else:
+                top = QFrame()
+                top.setProperty("class", "hero-top")
+            top_layout = QHBoxLayout(top)
+            top_layout.setContentsMargins(0, 0, 0, 0)
+            top_layout.setSpacing(0)
+            reading = QFrame()
+            reading.setProperty("class", "hero-reading")
+            reading_layout = QVBoxLayout(reading)
+            reading_layout.setContentsMargins(0, 0, 0, 0)
+            reading_layout.setSpacing(0)
+            reading_layout.addWidget(value, 0, Qt.AlignmentFlag.AlignLeft)
+            reading_layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
+            top_layout.addWidget(reading, 0, Qt.AlignmentFlag.AlignBottom)
+            if self.config.pet.enabled:
+                self._pet = CodexPetScene(self.config.pet.scale)
+                top_layout.addWidget(self._pet, 1, Qt.AlignmentFlag.AlignBottom)
+            else:
+                top_layout.addStretch(1)
+            layout.addWidget(top)
+        else:
+            layout.addWidget(value, 0, Qt.AlignmentFlag.AlignLeft)
+            layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
 
         progress = UsageBar(0, "unknown")
         layout.addWidget(progress)

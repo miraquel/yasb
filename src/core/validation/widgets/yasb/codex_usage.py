@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import Field
 
 from core.validation.widgets.base_model import CallbacksConfig, CustomBaseModel, KeybindingConfig
-from core.validation.widgets.yasb.claude_usage import ClaudeLevelColorsConfig
+from core.validation.widgets.yasb.claude_usage import ClaudeLevelColorsConfig, ClaudeSkyConfig
 
 
 class CodexUsageCallbacksConfig(CallbacksConfig):
@@ -66,6 +66,13 @@ class CodexSessionsConfig(CustomBaseModel):
     idle_icon: str = "○"
 
 
+class CodexPetConfig(CustomBaseModel):
+    # The Codex pet, living in the popup beside the main reading, as Clawd does for Claude.
+    enabled: bool = False
+    # Size of one of its pixels, on Clawd's scale; 1.35 matches Clawd's default.
+    scale: float = Field(default=1.35, ge=0.6, le=4.0)
+
+
 class CodexHeartsConfig(CustomBaseModel):
     # Three pixel hearts in the popup header: how much of the main (primary) window is left.
     enabled: bool = False
@@ -105,6 +112,9 @@ class CodexUsageConfig(CustomBaseModel):
     # (crit). The defaults are the widget's original split: 50% and 20% left.
     warn_percent: int = Field(default=50, ge=1, le=100)
     crit_percent: int = Field(default=80, ge=1, le=100)
+    pet: CodexPetConfig = CodexPetConfig()
+    # The sky behind the reading and the pet; the same options as the Claude widget's.
+    sky: ClaudeSkyConfig = ClaudeSkyConfig()
     sessions: CodexSessionsConfig = CodexSessionsConfig()
     hearts: CodexHeartsConfig = CodexHeartsConfig()
     footer: CodexFooterConfig = CodexFooterConfig()

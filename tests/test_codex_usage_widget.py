@@ -34,6 +34,11 @@ class LevelClassTest(unittest.TestCase):
         self.assertIsNone(config.progress_bar.level_colors)
         self.assertEqual((config.warn_percent, config.crit_percent), (50, 80))
 
+    def test_pet_and_sky_default_off(self):
+        config = CodexUsageConfig()
+        self.assertFalse(config.pet.enabled or config.sky.enabled)
+        self.assertEqual(config.pet.scale, 1.35)
+
 
 if __name__ == "__main__":
     unittest.main()
