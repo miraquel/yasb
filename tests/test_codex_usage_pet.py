@@ -1,7 +1,8 @@
-"""Tests for the Codex pet: its art (every pose on Clawd's grid) and, later in the file, its
-behaviour, driven with a seeded RNG and a fake clock so nothing depends on the real time.
+"""Tests for the Codex pet: its art (every pose on Clawd's grid) and its behaviour, driven tick
+by tick with a seeded RNG so every run plays the same.
 """
 
+import random
 import sys
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from core.utils.widgets.claude_usage.clawd import PX, PY  # noqa: E402
+from core.utils.widgets.codex_usage.codex_pet import ACT_LENGTHS, CodexPet, choose_mood  # noqa: E402
 from core.utils.widgets.codex_usage.codex_pet_art import (  # noqa: E402
     GRID_H,
     GRID_W,
@@ -85,6 +87,93 @@ class PetArtTest(unittest.TestCase):
         self.assertAlmostEqual(min(x for x, *_ in left.face), 4 * PX)
         no_cursor = pose_rects("idle", cursor=False)
         self.assertEqual(len(no_cursor.face), len(pose_rects("idle").face) - 1)  # the _ run is gone
+
+
+class PetBehaviourTest(unittest.TestCase):
+    def setUp(self):
+        self.pet = CodexPet(random.Random(1))
+
+    def test_moods(self):
+        self.assertEqual(choose_mood(None, 0, 0, 0), "asleep")
+        self.assertEqual(choose_mood(40, 0, 0, 2), "idle")
+        self.assertEqual(choose_mood(40, 1, 0, 2), "work")
+        self.assertEqual(choose_mood(40, 1, 1, 2), "wait")
+        self.assertEqual(choose_mood(100, 1, 1, 2), "spent")
+
+    def test_asleep_is_still_with_dim_closed_eyes(self):
+        self.pet.set_inputs(None, 0, 0, 0, [])
+        frames = [self.pet.step(200) for _ in range(50)]
+        self.assertEqual({f.pose for f in frames}, {"asleep"})
+        self.assertEqual({f.x for f in frames}, {frames[0].x})
+        self.assertEqual(frames[0].face_opacity, 0.4)
+        self.assertEqual(self.pet.mood_text(), "resting")
+
+    def test_working_types_and_the_cursor_blinks(self):
+        self.pet.set_inputs(40, 1, 0, 1, [])
+        frames = [self.pet.step(200) for _ in range(20)]
+        self.assertEqual({f.pose for f in frames}, {"type-1", "type-2"})
+        self.assertEqual({f.cursor for f in frames}, {True, False})
+
+    def test_waiting_shows_a_question_mark(self):
+        self.pet.set_inputs(40, 1, 1, 1, [])
+        frame = self.pet.step(200)
+        self.assertEqual((frame.pose, frame.bubble), ("wait", "?"))
+        self.assertGreater(frame.bubble_bottom, 44)
+
+    def test_finished_jumps_then_settles(self):
+        self.pet.set_inputs(40, 0, 0, 1, ["finished"])
+        frames = [self.pet.step(200) for _ in range(ACT_LENGTHS["jump"])]
+        self.assertEqual([f.pose for f in frames[:2]], ["crouch", "crouch"])
+        self.assertIn("jump", {f.pose for f in frames})
+        self.assertGreater(max(f.lift for f in frames), 6)
+        self.assertIsNone(self.pet.act)
+        self.assertEqual(self.pet.step(200).lift, 0)
+
+    def test_failed_droops_for_about_three_seconds(self):
+        self.pet.set_inputs(40, 0, 0, 1, ["failed"])
+        frames = [self.pet.step(200) for _ in range(ACT_LENGTHS["failed"])]
+        self.assertEqual({f.pose for f in frames}, {"failed"})
+        self.assertGreaterEqual(ACT_LENGTHS["failed"] * frames[0].interval_ms, 2900)
+        self.assertNotEqual(self.pet.step(200).pose, "failed")
+
+    def test_failed_beats_finished_in_one_update(self):
+        self.pet.set_inputs(40, 0, 0, 1, ["finished", "failed"])
+        self.assertEqual(self.pet.act, "failed")
+        self.pet.set_inputs(40, 0, 0, 1, ["finished"])
+        self.assertEqual(self.pet.act, "failed")
+
+    def test_spent_holds_the_failed_pose_and_ignores_clicks(self):
+        self.pet.set_inputs(100, 0, 0, 1, [])
+        self.pet.click()
+        self.assertIsNone(self.pet.act)
+        self.assertEqual({self.pet.step(200).pose for _ in range(40)}, {"failed"})
+
+    def test_click_waves(self):
+        self.pet.set_inputs(40, 0, 0, 1, [])
+        self.pet.click()
+        self.assertEqual(self.pet.act, "wave")
+        poses = {self.pet.step(200).pose for _ in range(ACT_LENGTHS["wave"])}
+        self.assertEqual(poses, {"wave-1", "wave-2"})
+
+    def test_idle_strolls_and_blinks(self):
+        self.pet.set_inputs(40, 0, 0, 1, [])
+        frames = [self.pet.step(300) for _ in range(800)]
+        self.assertGreater(len({f.x for f in frames}), 1)
+        poses = {f.pose for f in frames}
+        self.assertIn("blink", poses)
+        self.assertTrue({"walk-1", "walk-2"} <= poses)
+        walking = [f for f in frames if f.pose.startswith("walk")]
+        self.assertTrue(all(f.look in (-1, 1) for f in walking))
+
+    def test_standing_pet_looks_at_the_cursor(self):
+        self.pet.set_inputs(40, 0, 0, 1, [])
+        frame = self.pet.step(200)
+        self.assertEqual(self.pet.step(200, mouse_x=frame.x + 200).look, 1)
+        self.assertEqual(self.pet.step(200, mouse_x=-100).look, -1)
+
+    def test_narrow_area_keeps_pet_at_left(self):
+        self.pet.set_inputs(40, 0, 0, 1, [])
+        self.assertEqual({self.pet.step(10).x for _ in range(300)}, {0})
 
 
 if __name__ == "__main__":
