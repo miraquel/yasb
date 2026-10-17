@@ -51,6 +51,7 @@ build_options = {
         ("assets/images/media.png", "assets/images/media.png"),
         ("assets/sound/notification01.wav", "assets/sound/notification01.wav"),
         ("assets/sound/notification02.wav", "assets/sound/notification02.wav"),
+        ("assets/scripts/codex-waiting-hook.ps1", "assets/scripts/codex-waiting-hook.ps1"),
         ("core/widgets/services/quick_launch/providers/resources/Everything64.dll", "lib/Everything64.dll"),
         (f"core/widgets/services/systray/hook/{hook_dll_name}", f"lib/{hook_dll_name}"),
         ("core/widgets/services/quick_launch/providers/resources/emoji.json", "lib/emoji.json"),

@@ -620,6 +620,48 @@ can be turned on on its own.
   refresh fails. With the footer on, the account moves out of the header and the Overview page
   drops its `Updated` row. Signed out shows as `not signed in` with the `signed-out` class.
 
+### Waiting for approval (optional)
+
+Codex does not record approval prompts anywhere the widget can read, so *waiting* needs a small
+Codex hook that YASB ships at `C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1`.
+When Codex is about to ask for your approval, it leaves a marker for that session in
+`%LOCALAPPDATA%\YASB\codex-waiting`, and removes it when the tool runs or the turn ends. It only
+observes: it runs in the background, prints nothing, always exits 0 and never answers the prompt,
+so Codex asks you exactly as before. The widget ignores a marker once its turn has ended, its
+chat has closed, or Codex has moved on since (a denied request), so a leftover never shows as
+waiting.
+
+Add these to `~/.codex/config.toml` (YASB never edits it for you):
+
+```toml
+[[hooks.PermissionRequest]]
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+commandWindows = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+async = true
+
+[[hooks.PostToolUse]]
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+commandWindows = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+async = true
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+commandWindows = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+async = true
+```
+
+Then trust the hooks once with `/hooks` in Codex (trust is tied to the hook, so it is asked again
+if the script changes). Sessions run with approvals off (`--yolo`, `approval_mode = never`) never
+ask, so they never show as waiting. Sessions run through Codex's app-server (the desktop app,
+Claude Code's Codex plugin) may show *working* instead of *waiting* if Codex does not run hooks
+for them.
+
 The pet is painted rather than styled, so its colours come from `-qproperty-*` on
 `.codex-usage-menu .codex-pet`: `bodycolor` (default `#5478E6`), `screencolor` (`#181C46`),
 `facecolor` (`#8CF0F5`, the `>_` and chest light) and `askcolor` (`#FBBF24`, the `?`). The sky
