@@ -51,6 +51,12 @@ class ClaudeStatusConfig(CustomBaseModel):
     poll_interval: int = Field(default=300, ge=60, le=3600)
 
 
+class ClaudeLevelColorsConfig(CustomBaseModel):
+    low: str = "#4ade80"
+    medium: str = "#fbbf24"
+    high: str = "#f87171"
+
+
 class ClaudeUsageProgressBarConfig(CustomBaseModel):
     enabled: bool = False
     progress_type: Literal["circular", "linear_horizontal", "linear_vertical"] = "circular"
@@ -61,6 +67,47 @@ class ClaudeUsageProgressBarConfig(CustomBaseModel):
     background_color: str = "#3c3c3c"
     position: Literal["left", "right"] = "left"
     animation: bool = True
+    # Recolour the ring by the same warn/crit thresholds as the popup bars (traffic light).
+    # Unset keeps the single `color` whatever the value.
+    level_colors: ClaudeLevelColorsConfig | None = None
+
+
+class ClaudeClawdConfig(CustomBaseModel):
+    # Clawd, the Claude Code crab, living in the popup beside the 5-hour reading.
+    enabled: bool = False
+    # Size of one of his pixels relative to the original widget's; 1.35 is its default.
+    scale: float = Field(default=1.35, ge=0.6, le=4.0)
+
+
+class ClaudeSessionsConfig(CustomBaseModel):
+    # Live Claude Code sessions (working / waiting / idle), from Claude Code's own registry.
+    enabled: bool = False
+    show_in_menu: bool = True
+    # Rows listed in the popup; the rest collapse into "+N more". 0 shows only the counts.
+    max_rows: int = Field(default=6, ge=0, le=20)
+    poll_interval: int = Field(default=2, ge=1, le=60)
+    # Claude config directories to watch (each holding a `sessions` folder). Empty finds
+    # every ~/.claude* directory, so all accounts on the machine count.
+    dirs: list[str] = []
+    # nf-md-play: a plain U+25B6 is missing from most Nerd Fonts, and the fallback that
+    # supplies it on Windows is Segoe UI Emoji, which paints a blue emoji tile on the bar.
+    working_icon: str = "\U000f040a"
+    waiting_icon: str = "?"
+    idle_icon: str = "○"
+
+
+class ClaudeHeartsConfig(CustomBaseModel):
+    # Three pixel hearts in the popup header: how much of the 5-hour window is left.
+    enabled: bool = False
+    scale: float = Field(default=1.35, ge=0.6, le=4.0)
+
+
+class ClaudeFooterConfig(CustomBaseModel):
+    # Closing line: plan and account on the left, when the numbers last arrived on the right.
+    enabled: bool = False
+    show_plan: bool = True
+    # Mark the reading stale once it is older than this; 0 picks 3 x update_interval.
+    stale_after: int = Field(default=0, ge=0, le=86400)
 
 
 class ClaudeUsageConfig(CustomBaseModel):
@@ -92,6 +139,13 @@ class ClaudeUsageConfig(CustomBaseModel):
     mode_label_used: str = "used"
     mode_label_remaining: str = "left"
     tooltip: bool = True
+    # Where the bars, percentages and ring turn from low to medium (warn) and high (crit).
+    warn_percent: int = Field(default=60, ge=1, le=100)
+    crit_percent: int = Field(default=85, ge=1, le=100)
+    clawd: ClaudeClawdConfig = ClaudeClawdConfig()
+    sessions: ClaudeSessionsConfig = ClaudeSessionsConfig()
+    hearts: ClaudeHeartsConfig = ClaudeHeartsConfig()
+    footer: ClaudeFooterConfig = ClaudeFooterConfig()
     # Tracks whichever window the bar label is currently showing (5h, or 7d after toggle_label).
     progress_bar: ClaudeUsageProgressBarConfig = ClaudeUsageProgressBarConfig()
     callbacks: ClaudeUsageCallbacksConfig = ClaudeUsageCallbacksConfig()

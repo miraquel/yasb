@@ -1,5 +1,6 @@
 import logging
 import re
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,9 +24,18 @@ from core.utils.utilities import (
     build_progress_widget,
     refresh_widget_style,
 )
+from core.utils.widgets.claude_usage.clawd import Frame, heart_halves
+from core.utils.widgets.claude_usage.clawd_scene import ClawdScene, HeartsView
 from core.validation.widgets.yasb.claude_usage import ClaudeUsageConfig
 from core.widgets.base import BaseWidget
-from core.widgets.services.claude_usage.claude_api import ClaudeUsageService, read_account
+from core.widgets.services.claude_usage.claude_api import ClaudeUsageService, read_account, read_plan
+from core.widgets.services.claude_usage.sessions import (
+    STATUS_IDLE,
+    STATUS_WAITING,
+    STATUS_WORKING,
+    ClaudeSessionsService,
+    count_sessions,
+)
 from core.widgets.services.claude_usage.status import STATUS_LEVELS, ClaudeStatusService
 from core.widgets.services.claude_usage.token_history import TokenHistoryService, summarize
 
@@ -44,6 +54,10 @@ _EMPTY_TOKEN_SUMMARY: dict[str, Any] = {
     "models_by_period": {},
     "session_id": None,
 }
+# {hearts} on the bar: nf-md-heart, nf-md-heart_half_full, nf-md-heart_outline.
+_HEART_GLYPHS = ("\U000f02d1", "\U000f06df", "\U000f02d5")
+_LEVELS = ("low", "medium", "high", "unknown")
+_SESSION_STATES = (STATUS_WORKING, STATUS_WAITING, STATUS_IDLE)
 
 
 class UsageBar(QFrame):
@@ -141,6 +155,26 @@ class ClaudeUsageWidget(BaseWidget):
             self._status_service = ClaudeStatusService.get_instance(self.config.status.poll_interval)
             self._status = self._status_service.latest()
 
+        # Live Claude Code sessions (optional): Clawd's moods come from these, so he polls them
+        # even when the sessions list itself is turned off.
+        self._sessions_service: ClaudeSessionsService | None = None
+        self._sessions: list[dict[str, Any]] = []
+        self._session_summary: QLabel | None = None
+        self._session_rows: QFrame | None = None
+        self._session_layout: QGridLayout | None = None
+        if self.config.sessions.enabled or self.config.clawd.enabled:
+            self._sessions_service = ClaudeSessionsService.get_instance(
+                self.config.sessions.poll_interval, self.config.sessions.dirs
+            )
+            self._sessions = self._sessions_service.latest()
+
+        # Built with the popup; None until it first opens.
+        self._clawd: ClawdScene | None = None
+        self._hearts: HeartsView | None = None
+        self._meta_account: QLabel | None = None
+        self._meta_updated: QLabel | None = None
+        self._plan = read_plan() if self.config.footer.enabled and self.config.footer.show_plan else ""
+
         self.progress_widget = build_progress_widget(self, self.config.progress_bar.model_dump())
         self._init_container()
         self.build_widget_label(self.config.label, self.config.label_alt)
@@ -162,6 +196,8 @@ class ClaudeUsageWidget(BaseWidget):
             self._token_service.data_ready.connect(self._on_token_data)
         if self._status_service is not None:
             self._status_service.data_ready.connect(self._on_status_data)
+        if self._sessions_service is not None:
+            self._sessions_service.data_ready.connect(self._on_sessions_data)
         self.destroyed.connect(lambda *_: self._release_service())
         self._update_label()
 
@@ -183,6 +219,11 @@ class ClaudeUsageWidget(BaseWidget):
                 self._status_service.release()
             except RuntimeError:
                 pass
+        if self._sessions_service is not None:
+            try:
+                self._sessions_service.release()
+            except RuntimeError:
+                pass
 
     def closeEvent(self, event):
         self._release_service()
@@ -192,13 +233,61 @@ class ClaudeUsageWidget(BaseWidget):
         self._data = data
         self._update_label()
         self._sync_usage_sections()
+        self._feed_clawd()
+        self._sync_meta()
 
     def _refresh(self) -> None:
         if self.config.show_account:
             self._account = read_account()
+        if self.config.footer.enabled and self.config.footer.show_plan:
+            self._plan = read_plan()
         self._service.refresh_now()
         if self._status_service is not None:
             self._status_service.refresh_now()
+        if self._sessions_service is not None:
+            self._sessions_service.refresh_now()
+
+    def _on_sessions_data(self, sessions: list[dict[str, Any]]) -> None:
+        self._sessions = sessions
+        self._update_label()
+        self._feed_clawd()
+        self._sync_sessions_section()
+
+    @staticmethod
+    def _epoch(iso: str | None) -> float | None:
+        if not iso:
+            return None
+        try:
+            return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return None
+
+    def _feed_clawd(self) -> None:
+        """Hand Clawd and the hearts the latest sessions and 5-hour reading."""
+        percent = self._data.get("five")
+        if self._hearts is not None:
+            try:
+                self._hearts.set_state(heart_halves(percent), percent=percent)
+            except RuntimeError:
+                self._hearts = None
+        if self._clawd is not None:
+            counts = count_sessions(self._sessions)
+            try:
+                self._clawd.set_inputs(
+                    percent,
+                    counts[STATUS_WORKING],
+                    counts[STATUS_WAITING],
+                    counts["total"],
+                    self._epoch(self._data.get("five_reset_iso")),
+                )
+            except RuntimeError:
+                self._clawd = None
+
+    def _on_clawd_step(self, frame: Frame) -> None:
+        # While Clawd animates, the hearts follow his frame: the lost half blinks, and they
+        # beat when nearly out.
+        if self._hearts is not None:
+            self._hearts.set_state(frame.hearts, frame.heart_beat, self._data.get("five"))
 
     def _summarize_tokens(self, agg: dict[str, Any]) -> dict[str, Any]:
         th = self.config.token_history
@@ -289,7 +378,54 @@ class ClaudeUsageWidget(BaseWidget):
             "year_tokens": self._fmt_tokens(totals.get("year")),
             "status": self.config.status.icon if self.config.status.enabled else "",
             "status_text": self._status.get("description", "") if self.config.status.enabled else "",
+            "hearts": self._hearts_text(),
+            **self._session_values(),
         }
+
+    def _hearts_text(self) -> str:
+        """The 5-hour hearts as Nerd Font glyphs, e.g. full-full-half; empty with no reading."""
+        halves = heart_halves(self._data.get("five"))
+        if halves is None:
+            return ""
+        full, half, empty = _HEART_GLYPHS
+        return "".join(full if halves - 2 * i >= 2 else half if halves - 2 * i == 1 else empty for i in range(3))
+
+    def _session_values(self) -> dict[str, str]:
+        counts = count_sessions(self._sessions)
+        sc = self.config.sessions
+        badge = []
+        if counts[STATUS_WORKING]:
+            badge.append(f"{sc.working_icon}{counts[STATUS_WORKING]}")
+        if counts[STATUS_WAITING]:
+            badge.append(f"{sc.waiting_icon}{counts[STATUS_WAITING]}")
+        return {
+            "sessions_total": str(counts["total"]),
+            "sessions_working": str(counts[STATUS_WORKING]),
+            "sessions_waiting": str(counts[STATUS_WAITING]),
+            "sessions_idle": str(counts[STATUS_IDLE]),
+            # Only what needs attention, so it renders empty (and hides) when all is quiet.
+            "sessions_badge": " ".join(badge),
+        }
+
+    def _session_state(self) -> str:
+        """The most pressing session state, for the label's state class."""
+        counts = count_sessions(self._sessions)
+        if counts[STATUS_WAITING]:
+            return STATUS_WAITING
+        if counts[STATUS_WORKING]:
+            return STATUS_WORKING
+        return STATUS_IDLE
+
+    def _sessions_summary_text(self) -> str:
+        counts = count_sessions(self._sessions)
+        if not counts["total"]:
+            return "None running"
+        parts = [f"{counts['total']} open"]
+        if counts[STATUS_WORKING]:
+            parts.append(f"{counts[STATUS_WORKING]} working")
+        if counts[STATUS_WAITING]:
+            parts.append(f"{counts[STATUS_WAITING]} waiting")
+        return " · ".join(parts)
 
     @staticmethod
     def _pretty_model(model_id: str) -> str:
@@ -478,13 +614,13 @@ class ClaudeUsageWidget(BaseWidget):
         label.setText("" if text == "--" else text)
         label.setVisible(text != "--")
 
-    @staticmethod
-    def _level_class(value: Any) -> str:
+    def _level_class(self, value: Any) -> str:
+        """Traffic light for a utilization: low below warn_percent, high from crit_percent."""
         if not isinstance(value, (int, float)):
             return "unknown"
-        if value >= 80:
+        if value >= self.config.crit_percent:
             return "high"
-        if value >= 50:
+        if value >= self.config.warn_percent:
             return "medium"
         return "low"
 
@@ -524,6 +660,16 @@ class ClaudeUsageWidget(BaseWidget):
                 base = current_widget.property("class") or "status"
                 base = " ".join(t for t in base.split() if t not in STATUS_LEVELS)
                 current_widget.setProperty("class", f"{base} {self._status_level()}")
+            if "{sessions_" in part:
+                # .working / .waiting on the badge's own label, so waiting can stand out.
+                base = current_widget.property("class") or "sessions"
+                base = " ".join(t for t in base.split() if t not in _SESSION_STATES)
+                current_widget.setProperty("class", f"{base} {self._session_state()}")
+            if "{five_hour" in part or "{hearts}" in part:
+                # .low / .medium / .high from the same thresholds as the popup bars.
+                base = current_widget.property("class") or "label"
+                base = " ".join(t for t in base.split() if t not in _LEVELS)
+                current_widget.setProperty("class", f"{base} {self._level_class(self._data.get('five'))}")
             if self.config.tooltip:
                 # Spell out both sides here regardless of usage_mode, so the hover always
                 # answers the question the bar's single number cannot.
@@ -531,6 +677,8 @@ class ClaudeUsageWidget(BaseWidget):
                     f"Claude - 5h: {values['five_hour']}% used / {values['five_hour_remaining']}% left"
                     f" · 7d: {values['seven_day']}% used / {values['seven_day_remaining']}% left"
                 )
+                if self._sessions_service is not None:
+                    tip += f"\nSessions: {self._sessions_summary_text().lower()}"
                 account = self._account_line()
                 if account:
                     tip += f"\n{account}"
@@ -550,6 +698,11 @@ class ClaudeUsageWidget(BaseWidget):
             return
         value = self._data.get("seven" if self._show_alt_label else "five")
         self.progress_widget.setVisible(value is not None)
+        level_colors = self.config.progress_bar.level_colors
+        if level_colors is not None and isinstance(value, (int, float)):
+            # The level comes from consumption whichever way the ring runs, so red always
+            # means close to the limit.
+            self.progress_widget.set_color(getattr(level_colors, self._level_class(value)))
         if isinstance(value, (int, float)):
             # Follow usage_mode so the ring never contradicts the number beside it:
             # filling up as the window is consumed, or draining as it runs out.
@@ -570,6 +723,8 @@ class ClaudeUsageWidget(BaseWidget):
         """
         if not is_valid_qobject(self._menu):
             self._build_menu()
+        # Before show(): Clawd picks his entrance when he first appears, from these inputs.
+        self._feed_clawd()
         self._menu.setPosition(
             alignment=self.config.menu.alignment,
             direction=self.config.menu.direction,
@@ -582,6 +737,155 @@ class ClaudeUsageWidget(BaseWidget):
         self._sync_usage_sections()
         self._sync_token_section()
         self._sync_status()
+        self._sync_sessions_section()
+        self._sync_meta()
+
+    def _build_sessions_section(self) -> QFrame:
+        """Sessions section: what Claude Code is doing right now, one row per open session."""
+        frame = QFrame()
+        frame.setProperty("class", "section sessions")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        title_row = QFrame()
+        title_row.setProperty("class", "title-row")
+        title_layout = QHBoxLayout(title_row)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(0)
+        title_label = QLabel("Sessions")
+        title_label.setProperty("class", "title")
+        title_layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        title_layout.addStretch()
+        self._session_summary = QLabel("")
+        self._session_summary.setProperty("class", "summary")
+        self._session_summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        title_layout.addWidget(self._session_summary)
+        layout.addWidget(title_row)
+
+        self._session_rows = QFrame()
+        self._session_rows.setProperty("class", "session-rows")
+        self._session_layout = QGridLayout(self._session_rows)
+        self._session_layout.setContentsMargins(0, 0, 0, 0)
+        self._session_layout.setHorizontalSpacing(8)
+        self._session_layout.setVerticalSpacing(4)
+        self._session_layout.setColumnStretch(1, 1)
+        layout.addWidget(self._session_rows)
+
+        self._sync_sessions_section()
+        return frame
+
+    @staticmethod
+    def _clip(text: str, limit: int) -> str:
+        return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+    def _session_detail(self, session: dict[str, Any]) -> str:
+        if session["status"] == STATUS_WORKING:
+            return "working"
+        if session["status"] == STATUS_WAITING:
+            return f"needs you · {session['waiting_for']}" if session["waiting_for"] else "needs you"
+        return "idle"
+
+    def _sync_sessions_section(self) -> None:
+        """Rebuild the session rows and refit the popup's height to them."""
+        if self._session_layout is None:
+            return
+        sc = self.config.sessions
+        icons = {STATUS_WORKING: sc.working_icon, STATUS_WAITING: sc.waiting_icon, STATUS_IDLE: sc.idle_icon}
+        try:
+            self._session_summary.setText(self._sessions_summary_text())
+            while self._session_layout.count():
+                item = self._session_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    # Detached now (not just deleteLater) so the size hint below is current.
+                    widget.setParent(None)
+                    widget.deleteLater()
+            # Waiting first: those are the rows that want something from you.
+            order = {STATUS_WAITING: 0, STATUS_WORKING: 1, STATUS_IDLE: 2}
+            sessions = sorted(self._sessions, key=lambda s: order[s["status"]])
+            shown = sessions[: sc.max_rows]
+            for row, session in enumerate(shown):
+                marker = QLabel(icons[session["status"]])
+                marker.setProperty("class", f"marker {session['status']}")
+                name = QLabel(self._clip(session["name"], 30))
+                name.setProperty("class", "name")
+                detail = QLabel(self._clip(self._session_detail(session), 24))
+                detail.setProperty("class", f"detail {session['status']}")
+                detail.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                folder = session["cwd"] or session["name"]
+                for widget in (marker, name, detail):
+                    set_tooltip(widget, f"{session['name']}\n{folder}")
+                self._session_layout.addWidget(marker, row, 0)
+                self._session_layout.addWidget(name, row, 1)
+                self._session_layout.addWidget(detail, row, 2)
+            if len(sessions) > len(shown) and sc.max_rows:
+                more = QLabel(f"+{len(sessions) - len(shown)} more")
+                more.setProperty("class", "more")
+                self._session_layout.addWidget(more, len(shown), 1, 1, 2)
+            self._session_rows.setVisible(bool(shown))
+            align_label_text(self._session_rows)
+            if self._menu is not None and self._menu.isVisible():
+                # Same refit as the token section: recompute now, then resize the height only.
+                self._menu_layout.activate()
+                self._menu.resize(self._menu.width(), self._menu.sizeHint().height())
+        except RuntimeError:
+            self._session_summary = None
+            self._session_rows = None
+            self._session_layout = None
+
+    def _stale_after(self) -> int:
+        configured = self.config.footer.stale_after
+        if configured:
+            return configured
+        # Serving from cache is normal for up to cache_ttl, so stale starts past that.
+        return max(3 * self.config.update_interval, self.config.cache_ttl + 2 * self.config.update_interval)
+
+    def _build_meta_line(self) -> QFrame:
+        """Closing line: whose plan these numbers are, and how fresh they are."""
+        frame = QFrame()
+        frame.setProperty("class", "meta")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._meta_account = QLabel("")
+        self._meta_account.setProperty("class", "account")
+        set_tooltip(self._meta_account, self._account_tooltip())
+        layout.addWidget(self._meta_account)
+        layout.addStretch()
+        self._meta_updated = QLabel("")
+        self._meta_updated.setProperty("class", "updated")
+        self._meta_updated.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._meta_updated)
+        self._sync_meta()
+        return frame
+
+    def _sync_meta(self) -> None:
+        if self._meta_account is None:
+            return
+        try:
+            email = self._account_line()
+            signed_out = self.config.show_account and not email
+            if signed_out:
+                account_text = " · ".join(p for p in (self._plan, "not signed in") if p)
+            else:
+                account_text = " · ".join(p for p in (self._plan, email) if p)
+            self._meta_account.setText(self._clip(account_text, 40))
+            self._meta_account.setProperty("class", "account signed-out" if signed_out else "account")
+
+            fetched_at = int(self._data.get("fetched_at") or 0)
+            if not fetched_at:
+                updated, stale = "no data yet", True
+            else:
+                stamp = self._clock(datetime.fromtimestamp(fetched_at).astimezone())
+                stale = time.time() - fetched_at > self._stale_after()
+                updated = f"stale · {stamp}" if stale else f"updated {stamp}"
+            self._meta_updated.setText(updated)
+            self._meta_updated.setProperty("class", "updated stale" if stale else "updated")
+            refresh_widget_style(self._meta_account, self._meta_updated)
+        except RuntimeError:
+            self._meta_account = None
+            self._meta_updated = None
 
     def _build_token_section(self) -> QFrame:
         """Tokens section: a Session/Today/Week/Month/Year toggle, the selected total,
@@ -745,8 +1049,12 @@ class ClaudeUsageWidget(BaseWidget):
 
         for frame in self._usage_frames:
             layout.addWidget(frame)
+        if self.config.sessions.enabled and self.config.sessions.show_in_menu:
+            layout.addWidget(self._build_sessions_section())
         if self.config.token_history.enabled:
             layout.addWidget(self._build_token_section())
+        if self.config.footer.enabled:
+            layout.addWidget(self._build_meta_line())
 
     def _build_hero_frame(self, key: str, reset_format: str) -> QFrame:
         """The one reading the popup exists to deliver: percentage, what it measures, bar, countdown.
@@ -767,11 +1075,32 @@ class ClaudeUsageWidget(BaseWidget):
 
         value_label = QLabel(f"{self._pct_decimal(raw, value)}%")
         value_label.setProperty("class", f"hero-value {level}")
-        layout.addWidget(value_label, 0, Qt.AlignmentFlag.AlignLeft)
-
         caption = QLabel("of your 5-hour window")
         caption.setProperty("class", "hero-caption")
-        layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
+
+        if self.config.clawd.enabled:
+            # Clawd lives beside the reading, on the same ground line as its caption, as in
+            # the original widget's top row.
+            top = QFrame()
+            top.setProperty("class", "hero-top")
+            top_layout = QHBoxLayout(top)
+            top_layout.setContentsMargins(0, 0, 0, 0)
+            top_layout.setSpacing(0)
+            reading = QFrame()
+            reading.setProperty("class", "hero-reading")
+            reading_layout = QVBoxLayout(reading)
+            reading_layout.setContentsMargins(0, 0, 0, 0)
+            reading_layout.setSpacing(0)
+            reading_layout.addWidget(value_label, 0, Qt.AlignmentFlag.AlignLeft)
+            reading_layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
+            top_layout.addWidget(reading, 0, Qt.AlignmentFlag.AlignBottom)
+            self._clawd = ClawdScene(self.config.clawd.scale, self.config.crit_percent)
+            self._clawd.stepped.connect(self._on_clawd_step)
+            top_layout.addWidget(self._clawd, 1, Qt.AlignmentFlag.AlignBottom)
+            layout.addWidget(top)
+        else:
+            layout.addWidget(value_label, 0, Qt.AlignmentFlag.AlignLeft)
+            layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
 
         progress = UsageBar(int(value) if isinstance(value, (int, float)) else 0, level)
         layout.addWidget(progress)
@@ -951,7 +1280,8 @@ class ClaudeUsageWidget(BaseWidget):
         title_label.setProperty("class", "text")
         title_layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignLeft)
 
-        account_text = self._account_line()
+        # With the footer on, the account is part of its closing line instead.
+        account_text = "" if self.config.footer.enabled else self._account_line()
         if account_text:
             account_label = QLabel(account_text)
             account_label.setProperty("class", "account")
@@ -962,6 +1292,10 @@ class ClaudeUsageWidget(BaseWidget):
 
         header_layout.addWidget(title_stack)
         header_layout.addStretch()
+
+        if self.config.hearts.enabled:
+            self._hearts = HeartsView(self.config.hearts.scale)
+            header_layout.addWidget(self._hearts, 0, Qt.AlignmentFlag.AlignVCenter)
 
         refresh_btn = QPushButton("\U000f0450")
         refresh_btn.setProperty("class", "refresh")
