@@ -59,6 +59,12 @@ _SOURCES = {"cli": "terminal", "exec": "exec"}
 _FAILED = ("failed", "interrupted")
 # Waiting beats working beats idle when a sub-agent is rolled into its parent.
 _RANK = {STATUS_IDLE: 0, STATUS_WORKING: 1, STATUS_WAITING: 2}
+# A crash leaves its turn inProgress for good, and reopening that chat takes its lock again, so a
+# running turn only counts while it shows a sign of life: started, or an item of it finished,
+# within this long. Items land as they finish, so a quiet stretch is one long-running command.
+_STALE_TURN_S = 3 * 3600
+# How long the poller keeps its last good list while the databases cannot be read.
+_GIVE_UP_S = 30
 
 
 def codex_home() -> str:
@@ -162,6 +168,16 @@ def _latest_turns(con: sqlite3.Connection, ids: list[str]) -> dict[str, dict[str
     return turns
 
 
+def _last_sign_of_life(con: sqlite3.Connection, thread_id: str, turn: dict[str, Any]) -> float:
+    """When a turn last showed it was running, in epoch seconds: its start or its latest item."""
+    (latest_ms,) = con.execute(
+        "select max(max(coalesce(completed_at_ms, 0), coalesce(created_at_ms, 0)))"
+        " from thread_items where thread_id = ? and turn_id = ?",
+        (thread_id, turn["turn_id"]),
+    ).fetchone()
+    return max(float(turn["started_at"] or 0), (latest_ms or 0) / 1000)
+
+
 def _answered_since(con: sqlite3.Connection, thread_id: str, turn_id: str, since_ms: int) -> bool:
     """Whether the turn moved on after the approval prompt: an item started or finished since."""
     (latest,) = con.execute(
@@ -203,7 +219,7 @@ def read_codex_sessions(
             turns = _latest_turns(con, open_ids) if con else {}
             states: dict[str, tuple[str, str]] = {}
             for thread_id, turn in turns.items():
-                if turn["status"] != "inProgress":
+                if turn["status"] != "inProgress" or now - _last_sign_of_life(con, thread_id, turn) > _STALE_TURN_S:
                     continue
                 marker = read_marker(markers_dir, thread_id)
                 waiting = (
@@ -314,6 +330,8 @@ class CodexSessionsService(QObject):
         self._markers = str(app_data_path("codex-waiting"))
         self._data: list[dict[str, Any]] = []
         self._signature: tuple = ()
+        self._clock = time.monotonic
+        self._last_good = self._clock()
 
         self._timer = QTimer(self)
         self._timer.setInterval(max(poll_interval_s, 1) * 1000)
@@ -340,9 +358,17 @@ class CodexSessionsService(QObject):
             sessions = read_codex_sessions(self._home, self._markers, time.time(), self._idle_minutes)
         except Exception as e:
             logger.debug("Codex session scan failed: %s", e)
-            return
+            sessions = None
         if sessions is None:
+            # A database mid-write reads again in a moment; one that stays unreadable (a newer
+            # schema, a corrupt file) must not leave a session frozen as working.
+            if self._data and self._clock() - self._last_good > _GIVE_UP_S:
+                logger.warning("Codex sessions unreadable for %ss; showing none until they read again", _GIVE_UP_S)
+                self._data = []
+                self._signature = ()
+                self.data_ready.emit([])
             return
+        self._last_good = self._clock()
         # Only announce a change: the popup rebuilds its rows on every emit.
         signature = tuple(
             (s["session_id"], s["status"], s["turn_id"], s["turn_status"], s["name"], s["tool"]) for s in sessions

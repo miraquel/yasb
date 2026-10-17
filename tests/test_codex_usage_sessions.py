@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -22,6 +23,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from core.validation.widgets.yasb.codex_usage import CodexUsageConfig  # noqa: E402
+from core.widgets.services.codex_usage import sessions as sessions_module  # noqa: E402
 from core.widgets.services.codex_usage.sessions import (  # noqa: E402
     LOCK_MISSING,
     LOCK_OPEN,
@@ -186,6 +188,18 @@ class CodexSessionsTest(unittest.TestCase):
         self.mark("t1", "u2")
         self.assertEqual(self.read(home, t1=LOCK_OPEN)[0]["status"], "idle")
 
+    def test_turn_left_over_by_a_crash_is_not_working(self):
+        # t1's turn has said inProgress for a month (its process died), and reopening the chat
+        # took its lock again; t2 has run for 4 hours but finished an item 10 minutes ago.
+        home = make_home(
+            self.root,
+            [thread("t1"), thread("t2")],
+            [turn("t1", "u1", "inProgress", NOW - 30 * 86400), turn("t2", "u2", "inProgress", NOW - 4 * 3600)],
+            items=[("t2", "u2", int((NOW - 900) * 1000), int((NOW - 600) * 1000))],
+        )
+        sessions = self.read(home, t1=LOCK_OPEN, t2=LOCK_OPEN)
+        self.assertEqual([(s["session_id"], s["status"]) for s in sessions], [("t2", "working")])
+
     def test_subagent_rolls_into_parent(self):
         home = make_home(
             self.root,
@@ -285,6 +299,43 @@ class CodexSessionsConfigTest(unittest.TestCase):
         self.assertEqual(
             (config.sessions.idle_minutes, config.sessions.poll_interval, config.sessions.max_rows), (30, 2, 6)
         )
+
+
+class CodexSessionsServiceTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from PyQt6.QtCore import QCoreApplication
+
+        cls.app = QCoreApplication.instance() or QCoreApplication([])
+
+    def test_failed_reads_keep_the_list_then_give_up(self):
+        session = {"session_id": "t1", "status": "working", "turn_id": "u1", "turn_status": "inProgress"}
+        session.update(name="fix tests", tool="")
+        reads = [[session]]
+        with mock.patch.object(sessions_module, "read_codex_sessions", lambda *a, **k: reads.pop(0) if reads else None):
+            service = sessions_module.CodexSessionsService(60, 30, ("test",))
+            got: list[list] = []
+            service.data_ready.connect(got.append)
+            self.assertEqual(service.latest(), [session])
+            now = [1000.0]
+            service._clock = lambda: now[0]
+            service._last_good = now[0]
+            # A busy database for a moment: the last good list stays.
+            for now[0] in (1010.0, 1029.0):
+                service._tick()
+            self.assertEqual((got, service.latest()), ([], [session]))
+            # Still unreadable half a minute on: show nothing rather than a frozen "working".
+            now[0] = 1031.0
+            service._tick()
+            self.assertEqual((got, service.latest()), ([[]], []))
+            now[0] = 1040.0
+            service._tick()
+            self.assertEqual(got, [[]])
+            # Readable again: the list comes back.
+            reads.append([session])
+            service._tick()
+            self.assertEqual(got, [[], [session]])
+            service._timer.stop()
 
 
 if __name__ == "__main__":
