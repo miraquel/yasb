@@ -21,6 +21,7 @@ import pythoncom
 import pywintypes
 import win32api
 import win32com.client
+import win32timezone  # noqa: F401  # pywintypes imports it at runtime to convert COM dates; named so the build bundles it
 
 from core.utils.shell_utils import shell_open
 from core.utils.win32.bindings.user32 import AllowSetForegroundWindow
