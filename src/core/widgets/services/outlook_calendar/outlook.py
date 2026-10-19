@@ -13,7 +13,6 @@ itself.
 
 from __future__ import annotations
 
-import ctypes
 import logging
 import threading
 from datetime import UTC, datetime, timedelta
@@ -24,6 +23,8 @@ import win32api
 import win32com.client
 
 from core.utils.shell_utils import shell_open
+from core.utils.win32.bindings.user32 import AllowSetForegroundWindow
+from core.utils.win32.constants import ASFW_ANY, DATE_SHORTDATE, LOCALE_USER_DEFAULT, TIME_NOSECONDS
 from core.widgets.services.outlook_calendar.agenda import RESPONSE_DECLINED, CalEvent, day_start, find_join_url
 
 logger = logging.getLogger("outlook_calendar")
@@ -34,10 +35,6 @@ _CANCELLED = (5, 7)  # olMeetingCanceled, olMeetingReceivedAndCanceled
 # MK_E_UNAVAILABLE: not in the Running Object Table, so not running in this session (or
 # running at another integrity level). CO_E_CLASSSTRING: classic Outlook is not installed.
 _NOT_RUNNING = (-2147221021, -2147221005)
-_LOCALE_USER_DEFAULT = 0x0400
-_DATE_SHORTDATE = 0x1
-_TIME_NOSECONDS = 0x2
-_ASFW_ANY = -1
 
 
 class OutlookNotRunning(Exception):
@@ -65,8 +62,8 @@ def _com_time(value: datetime):
 def outlook_time(value: datetime) -> str:
     """*value* the way Items.Restrict parses a date: the user's short date and time format."""
     stamp = _com_time(value)
-    date_text = win32api.GetDateFormat(_LOCALE_USER_DEFAULT, _DATE_SHORTDATE, stamp, None)
-    time_text = win32api.GetTimeFormat(_LOCALE_USER_DEFAULT, _TIME_NOSECONDS, stamp, None)
+    date_text = win32api.GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, stamp, None)
+    time_text = win32api.GetTimeFormat(LOCALE_USER_DEFAULT, TIME_NOSECONDS, stamp, None)
     return f"{date_text} {time_text}"
 
 
@@ -142,7 +139,7 @@ def fetch(now: datetime, days: int, scan_body: bool = True, application=None) ->
 
 def _allow_foreground() -> None:
     """Let Outlook take the foreground; Windows only allows it if the foreground process says so."""
-    ctypes.windll.user32.AllowSetForegroundWindow(_ASFW_ANY)
+    AllowSetForegroundWindow(ASFW_ANY)
 
 
 def _open(entry_id: str, store_id: str, start: datetime, recurring: bool, application) -> None:
