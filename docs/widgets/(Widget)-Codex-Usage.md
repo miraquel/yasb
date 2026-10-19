@@ -79,13 +79,22 @@ codex_usage:
 | `usage_mode` | string | `remaining` | Whether `{*_value}` and the progress bar report the share still available (`remaining`) or consumed (`used`). Flipped at runtime by the `toggle_usage_mode` callback. Note the Claude widget defaults to `used`, so set both explicitly if you run them side by side. |
 | `mode_label_used` | string | `used` | The word `{mode}` renders while showing consumed. |
 | `mode_label_remaining` | string | `left` | The word `{mode}` renders while showing remaining. |
+| `warn_percent` | integer | `50` | Share used from which the bars, percentages and ring turn from good to low (1-100). |
+| `crit_percent` | integer | `80` | Share used from which they turn critical (1-100). The defaults keep the original split: 50% and 20% left. |
+| `pet` | dictionary | `{'enabled': false, 'scale': 1.35}` | The Codex pet in the popup. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
+| `sky` | dictionary | `{'enabled': false, ...}` | The sky behind the main reading and the pet, with the Claude widget's options. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
+| `sessions` | dictionary | `{'enabled': false, ...}` | Live Codex sessions. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
+| `hearts` | dictionary | `{'enabled': false, 'scale': 1.35}` | Pixel hearts in the popup header. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
+| `footer` | dictionary | `{'enabled': false, ...}` | Plan, account and freshness line closing the popup. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
 | `progress_bar` | dictionary | See example | Native bar indicator showing the active window's remaining percentage. |
 | `callbacks` | dictionary | See example | Mouse actions. |
 | `menu` | dictionary | See example | Popup position, appearance, section visibility, and Fluent navigation icons. `icon` takes a path to an image drawn at 22x22 at the left of the popup header, beside the title and account line; any format Qt can read works, and an empty value leaves the header unmarked. |
 
 The progress bar supports `circular`, `linear_horizontal`, and `linear_vertical`. `color` may be
 a single color or a list of gradient colors. Right-click toggles the active label/window, and
-the progress bar follows it.
+the progress bar follows it. Set `progress_bar.level_colors` (`low`, `medium`, `high`, as on the
+Claude widget) to recolour the ring by `warn_percent` / `crit_percent` instead: `low` while under
+warn, `medium` from warn, `high` from crit, always from the share used.
 
 ## Details Popup
 
@@ -153,6 +162,11 @@ but are marked as unavailable rather than incorrectly displayed as zero usage.
 - `{plan}` - account plan reported by Codex.
 - `{credits}` - available credit balance, when present.
 - `{stale}` - warning glyph when the last refresh failed and cached data is displayed.
+- `{sessions_badge}` - working and waiting Codex sessions in one compact string (e.g. `▶2 ?1`),
+  empty when nothing is working or waiting. Its label gets a `.working` / `.waiting` / `.idle`
+  class for the most pressing state, so place it in its own `<span>`. Requires
+  `sessions.enabled`.
+- `{sessions_total}` `{sessions_working}` `{sessions_waiting}` `{sessions_idle}` - the counts.
 
 Window names are deliberately derived from `windowDurationMins` instead of assuming that every
 account has a 5-hour and weekly limit. Missing secondary limits render as `--` and are omitted
@@ -544,6 +558,133 @@ Qt scales these logical pixel sizes with the active Windows display scale. The c
     background-color: transparent;
     border: 1px solid rgba(255, 255, 255, 0.08);
 }
+```
+
+## Pet, sessions, hearts and footer
+
+The same extras as the Claude widget's Clawd section, for Codex. Each part is off by default and
+can be turned on on its own.
+
+```yaml
+    warn_percent: 60
+    crit_percent: 85
+    pet:
+      enabled: true
+      scale: 1.35          # size of one of its pixels, on Clawd's scale; 0.6-4.0
+    sky:
+      enabled: true
+      latitude: -6.1783    # decimal degrees; without both, the sky follows the clock only
+      longitude: 106.6319
+      weather: true        # live weather from Open-Meteo (met.no if blocked); no key
+    sessions:
+      enabled: true
+      show_in_menu: true
+      max_rows: 6          # rows listed; the rest collapse into "+N more"
+      poll_interval: 2     # seconds between reads (1-60)
+      idle_minutes: 30     # an idle chat counts while its last turn is this recent (1-1440)
+    hearts:
+      enabled: true
+    footer:
+      enabled: true
+      show_plan: true
+      stale_after: 0       # seconds; 0 = past cache_ttl + 2 x update_interval
+```
+
+- **pet:** The default Codex pet - a blue cloud whose face is a little screen showing `>_` -
+  redrawn by hand in pixels at Clawd's width, lives beside the main reading. With no Codex
+  session open it sleeps, eyes shut and its face dimmed; with sessions idle it blinks, strolls
+  across the strip now and then and looks at your cursor; while Codex works it types on its
+  laptop; while Codex waits for your approval it hops under a `?` (needs the optional hook
+  below). It jumps when a turn finishes, droops with an `x` face for a few seconds when one fails
+  or is interrupted, stays drooped once the main window is used up, and waves when clicked. It
+  animates only while the popup is open. Its strip is taller than Clawd's (the pet is about
+  twice his height), so the hero row grows by about 30 px at the default scale. The pet's moods
+  come from the sessions below, which are read even with the list itself turned off.
+- **sky:** The Claude widget's sky (see its docs for what it shows), behind the reading and the
+  pet, with the same options. Hovering the pet adds the weather to its tooltip.
+- **sessions:** Live sessions read from Codex's own files, read-only and with no network: a
+  chat counts while a Codex process holds its lock in `~/.codex/thread-writer-locks`, so a
+  closed or crashed one never lingers. It is *working* while its newest turn runs, *waiting*
+  while Codex asks for your approval (needs the optional hook below), and *idle* otherwise.
+  Codex keeps finished chats loaded for hours (Claude Code's Codex plugin and the desktop app
+  do), so an idle chat only counts while its last turn is under `idle_minutes` old. Sub-agents
+  count towards the chat that started them. The popup lists them, waiting ones first, each with
+  the app that started it (`Claude Code`, `Desktop`, `terminal`, `exec`), under a summary like
+  `3 open · 1 working`. `~/.codex/auth.json` is never opened.
+- **hearts:** Three hearts in the header, tamagotchi-style: every half heart is about 16.7% of
+  the main window left (whatever its length; a week on some plans), and they empty only at 100%.
+  Hovering says how much is left. Their colours are `-qproperty-heartcolor` and
+  `-qproperty-emptycolor` on `.codex-usage-menu .header .hearts`.
+- **footer:** A closing line with the plan and the account, and on the right when the numbers
+  last arrived (`updated 14:05`), which turns into `stale · 14:05` once they stop arriving or a
+  refresh fails. With the footer on, the account moves out of the header and the Overview page
+  drops its `Updated` row. Signed out shows as `not signed in` with the `signed-out` class.
+
+### Waiting for approval (optional)
+
+Codex does not record approval prompts anywhere the widget can read, so *waiting* needs a small
+Codex hook that YASB ships at `C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1`.
+When Codex is about to ask for your approval, it leaves a marker for that session in
+`%LOCALAPPDATA%\YASB\codex-waiting`, and removes it when the tool runs or the turn ends. It only
+observes: it runs in the background, prints nothing, always exits 0 and never answers the prompt,
+so Codex asks you exactly as before. The widget ignores a marker once its turn has ended, its
+chat has closed, or Codex has moved on since (a denied request), so a leftover never shows as
+waiting.
+
+Add these to `~/.codex/config.toml` (YASB never edits it for you):
+
+```toml
+[[hooks.PermissionRequest]]
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+commandWindows = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+async = true
+
+[[hooks.PostToolUse]]
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+commandWindows = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+async = true
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+commandWindows = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\YASB\assets\scripts\codex-waiting-hook.ps1"'
+async = true
+```
+
+Then trust the hooks once with `/hooks` in Codex (trust is tied to the hook, so it is asked again
+if the script changes). Sessions run with approvals off (`--yolo`, `approval_mode = never`) never
+ask, so they never show as waiting. Sessions run through Codex's app-server (the desktop app,
+Claude Code's Codex plugin) may show *working* instead of *waiting* if Codex does not run hooks
+for them.
+
+The pet is painted rather than styled, so its colours come from `-qproperty-*` on
+`.codex-usage-menu .codex-pet`: `bodycolor` (default `#5478E6`), `screencolor` (`#181C46`),
+`facecolor` (`#8CF0F5`, the `>_` and chest light) and `askcolor` (`#FBBF24`, the `?`). The sky
+takes `-qproperty-strength`, `-qproperty-fxopacity` and `-qproperty-edgefade` on
+`.codex-usage-menu .sky`, as on the Claude widget.
+
+The sessions section and the footer use the Claude popup's classes, so their rules can be shared:
+
+```css
+.codex-usage-menu .hero-top {}                           /* the reading and the pet; also .sky */
+.codex-usage-menu .hero-reading {}
+.codex-usage-menu .codex-pet {}
+.codex-usage-menu .section.sessions {}
+.codex-usage-menu .section.sessions .title-row .title {}
+.codex-usage-menu .section.sessions .title-row .summary {}
+.codex-usage-menu .section.sessions .marker.working {}   /* also .waiting / .idle */
+.codex-usage-menu .section.sessions .name {}
+.codex-usage-menu .section.sessions .detail.waiting {}   /* also .working / .idle */
+.codex-usage-menu .section.sessions .more {}
+.codex-usage-menu .header .hearts {}
+.codex-usage-menu .meta {}
+.codex-usage-menu .meta .account {}                      /* also .signed-out */
+.codex-usage-menu .meta .updated {}                      /* also .stale */
 ```
 
 ## Troubleshooting

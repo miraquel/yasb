@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import Field
 
 from core.validation.widgets.base_model import CallbacksConfig, CustomBaseModel, KeybindingConfig
+from core.validation.widgets.yasb.claude_usage import ClaudeLevelColorsConfig, ClaudeSkyConfig
 
 
 class CodexUsageCallbacksConfig(CallbacksConfig):
@@ -44,6 +45,46 @@ class CodexUsageProgressBarConfig(CustomBaseModel):
     background_color: str = "#3c3c3c"
     position: Literal["left", "right"] = "left"
     animation: bool = True
+    # Recolour the ring by warn_percent / crit_percent (traffic light), as on the Claude widget:
+    # `low` while under warn, `medium` from warn, `high` from crit. Unset keeps `color`.
+    level_colors: ClaudeLevelColorsConfig | None = None
+
+
+class CodexSessionsConfig(CustomBaseModel):
+    # Live Codex sessions (working / waiting / idle), read from Codex's own files in ~/.codex.
+    enabled: bool = False
+    show_in_menu: bool = True
+    # Rows listed in the popup; the rest collapse into "+N more". 0 shows only the counts.
+    max_rows: int = Field(default=6, ge=0, le=20)
+    poll_interval: int = Field(default=2, ge=1, le=60)
+    # Codex keeps finished chats loaded for hours (Claude Code's Codex plugin, the desktop app),
+    # so an idle one only counts while its last turn is this recent.
+    idle_minutes: int = Field(default=30, ge=1, le=1440)
+    # nf-md-play, as on the Claude widget.
+    working_icon: str = "󰐊"
+    waiting_icon: str = "?"
+    idle_icon: str = "○"
+
+
+class CodexPetConfig(CustomBaseModel):
+    # The Codex pet, living in the popup beside the main reading, as Clawd does for Claude.
+    enabled: bool = False
+    # Size of one of its pixels, on Clawd's scale; 1.35 matches Clawd's default.
+    scale: float = Field(default=1.35, ge=0.6, le=4.0)
+
+
+class CodexHeartsConfig(CustomBaseModel):
+    # Three pixel hearts in the popup header: how much of the main (primary) window is left.
+    enabled: bool = False
+    scale: float = Field(default=1.35, ge=0.6, le=4.0)
+
+
+class CodexFooterConfig(CustomBaseModel):
+    # Closing line: plan and account on the left, when the numbers last arrived on the right.
+    enabled: bool = False
+    show_plan: bool = True
+    # Mark the reading stale once it is older than this; 0 picks cache_ttl + 2 x update_interval.
+    stale_after: int = Field(default=0, ge=0, le=86400)
 
 
 class CodexUsageConfig(CustomBaseModel):
@@ -67,6 +108,16 @@ class CodexUsageConfig(CustomBaseModel):
     show_account: bool = True
     show_token_usage: bool = True
     stale_icon: str = "⚠"
+    # Share used where the bars, percentages and ring turn from good to low (warn) and critical
+    # (crit). The defaults are the widget's original split: 50% and 20% left.
+    warn_percent: int = Field(default=50, ge=1, le=100)
+    crit_percent: int = Field(default=80, ge=1, le=100)
+    pet: CodexPetConfig = CodexPetConfig()
+    # The sky behind the reading and the pet; the same options as the Claude widget's.
+    sky: ClaudeSkyConfig = ClaudeSkyConfig()
+    sessions: CodexSessionsConfig = CodexSessionsConfig()
+    hearts: CodexHeartsConfig = CodexHeartsConfig()
+    footer: CodexFooterConfig = CodexFooterConfig()
     progress_bar: CodexUsageProgressBarConfig = CodexUsageProgressBarConfig()
     callbacks: CodexUsageCallbacksConfig = CodexUsageCallbacksConfig()
     menu: CodexUsageMenuConfig = CodexUsageMenuConfig()

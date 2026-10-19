@@ -29,9 +29,37 @@ from core.utils.utilities import (
     build_progress_widget,
     refresh_widget_style,
 )
+from core.utils.widgets.ai_usage.hearts import heart_halves
+from core.utils.widgets.ai_usage.scene import HeartsView, SkyScene
+from core.utils.widgets.ai_usage.sky import apply_sky_settings
+from core.utils.widgets.codex_usage.codex_pet_scene import CodexPetScene
 from core.validation.widgets.yasb.codex_usage import CodexUsageConfig
 from core.widgets.base import BaseWidget
+from core.widgets.services.ai_usage.weather import SkyWeatherService
 from core.widgets.services.codex_usage.codex_api import CodexUsageService
+from core.widgets.services.codex_usage.sessions import (
+    STATUS_IDLE,
+    STATUS_WAITING,
+    STATUS_WORKING,
+    CodexSessionsService,
+    count_sessions,
+    turn_events,
+)
+
+_SESSION_STATES = (STATUS_WORKING, STATUS_WAITING, STATUS_IDLE)
+# The ring's level_colors keys (the Claude widget's names) for this widget's level classes.
+_LEVEL_COLOR_KEYS = {"good": "low", "low": "medium", "critical": "high"}
+
+
+def level_class(used: Any, warn: float, crit: float) -> str:
+    """Traffic light for a window's share used: good under warn, low from warn, critical from crit."""
+    if not isinstance(used, (int, float)):
+        return "unknown"
+    if used >= crit:
+        return "critical"
+    if used >= warn:
+        return "low"
+    return "good"
 
 
 class UsageBar(QFrame):
@@ -207,6 +235,9 @@ class CodexUsageWidget(BaseWidget):
         self._heatmap_history_note: QLabel | None = None
         self._model_widgets: list[dict[str, Any]] = []
         self._plan_label: QLabel | None = None
+        self._hearts: HeartsView | None = None
+        self._meta_account: QLabel | None = None
+        self._meta_updated: QLabel | None = None
         self._menu_title_label: QLabel | None = None
         self._refresh_button: RefreshButton | None = None
         self._refresh_status: QLabel | None = None
@@ -226,6 +257,32 @@ class CodexUsageWidget(BaseWidget):
         )
         self._data: dict[str, Any] = self._service.latest()
 
+        # Live Codex sessions (optional), from Codex's own files. The pet's moods come from
+        # these, so it polls them even when the list itself is off.
+        self._sessions_service: CodexSessionsService | None = None
+        self._sessions: list[dict[str, Any]] = []
+        # Turns that ended since the pet last looked: "finished" / "failed".
+        self._pending_events: list[str] = []
+        self._session_summary: QLabel | None = None
+        self._session_rows: QFrame | None = None
+        self._session_layout: QGridLayout | None = None
+        if self.config.sessions.enabled or self.config.pet.enabled:
+            self._sessions_service = CodexSessionsService.get_instance(
+                self.config.sessions.poll_interval, self.config.sessions.idle_minutes
+            )
+            self._sessions = self._sessions_service.latest()
+
+        # Weather for the sky (optional): fetched only for configured coordinates, never guessed.
+        sky = self.config.sky
+        self._weather_service: SkyWeatherService | None = None
+        self._weather: dict[str, Any] = {}
+        if sky.enabled and sky.weather and sky.latitude is not None and sky.longitude is not None:
+            self._weather_service = SkyWeatherService.get_instance(sky.latitude, sky.longitude, sky.weather_interval)
+            self._weather = self._weather_service.latest()
+        # Built with the popup; None until it first opens.
+        self._pet: CodexPetScene | None = None
+        self._sky: SkyScene | None = None
+
         self.progress_widget = build_progress_widget(self, self.config.progress_bar.model_dump())
         self._init_container()
         self.build_widget_label(self.config.label, self.config.label_alt)
@@ -242,6 +299,10 @@ class CodexUsageWidget(BaseWidget):
         self.callback_right = self.config.callbacks.on_right
 
         self._service.data_ready.connect(self._on_data)
+        if self._sessions_service is not None:
+            self._sessions_service.data_ready.connect(self._on_sessions_data)
+        if self._weather_service is not None:
+            self._weather_service.data_ready.connect(self._on_weather_data)
         self.destroyed.connect(lambda *_: self._release_service())
         self._update_label()
 
@@ -257,6 +318,16 @@ class CodexUsageWidget(BaseWidget):
             self._service.release()
         except RuntimeError:
             pass
+        if self._sessions_service is not None:
+            try:
+                self._sessions_service.release()
+            except RuntimeError:
+                pass
+        if self._weather_service is not None:
+            try:
+                self._weather_service.release()
+            except RuntimeError:
+                pass
 
     def _refresh(self) -> None:
         if is_valid_qobject(self._menu) and self._menu.isVisible() and is_valid_qobject(self._refresh_button):
@@ -266,12 +337,105 @@ class CodexUsageWidget(BaseWidget):
             self._refresh_button.start_animation()
             self._set_refresh_feedback("Refreshing…", "busy")
         self._service.refresh_now()
+        if self._sessions_service is not None:
+            self._sessions_service.refresh_now()
 
     def _on_data(self, data: dict[str, Any]) -> None:
         self._data = data
         self._update_label()
         self._sync_menu()
+        self._feed_pet()
         self._finish_refresh_feedback(not data.get("stale"))
+
+    def _on_sessions_data(self, sessions: list[dict[str, Any]]) -> None:
+        # Kept short: nothing may consume them for a while (the popup closed, no pet).
+        self._pending_events = (self._pending_events + turn_events(self._sessions, sessions))[-8:]
+        self._sessions = sessions
+        self._update_label()
+        self._feed_pet()
+        self._sync_sessions_section()
+
+    def _feed_pet(self) -> None:
+        """Hand the pet the latest sessions, the main window's share used and the turns that ended."""
+        if self._pet is None:
+            # No popup yet: a reaction to a turn that ended long before it opens would be noise.
+            self._pending_events.clear()
+            return
+        used = self._window("primary").get("used")
+        counts = count_sessions(self._sessions)
+        events, self._pending_events = self._pending_events, []
+        try:
+            self._pet.set_inputs(
+                float(used) if isinstance(used, (int, float)) else None,
+                counts[STATUS_WORKING],
+                counts[STATUS_WAITING],
+                counts["total"],
+                events,
+            )
+        except RuntimeError:
+            self._pet = None
+
+    def _on_weather_data(self, data: dict[str, Any]) -> None:
+        self._weather = data
+        self._feed_sky()
+
+    @staticmethod
+    def _clock_minutes(minutes: float) -> str:
+        m = round(minutes) % 1440
+        return f"{m // 60:02d}:{m % 60:02d}"
+
+    def _feed_sky(self) -> None:
+        """Hand the sky its settings and the latest weather, and word its tooltip."""
+        if self._sky is None:
+            return
+        try:
+            model = self._sky.model
+            apply_sky_settings(model, self.config.sky, self._weather)
+            tip = "\n".join(model.describe(datetime.now().astimezone(), self._clock_minutes))
+            # The pet covers part of the sky, so its tooltip carries it; without it the sky has its own.
+            if self._pet is not None:
+                self._pet.set_tip_extra(tip)
+            else:
+                self._sky.set_tip(tip)
+        except RuntimeError:
+            self._sky = None
+
+    def _session_values(self) -> dict[str, str]:
+        counts = count_sessions(self._sessions)
+        sc = self.config.sessions
+        badge = []
+        if counts[STATUS_WORKING]:
+            badge.append(f"{sc.working_icon}{counts[STATUS_WORKING]}")
+        if counts[STATUS_WAITING]:
+            badge.append(f"{sc.waiting_icon}{counts[STATUS_WAITING]}")
+        return {
+            "sessions_total": str(counts["total"]),
+            "sessions_working": str(counts[STATUS_WORKING]),
+            "sessions_waiting": str(counts[STATUS_WAITING]),
+            "sessions_idle": str(counts[STATUS_IDLE]),
+            # Only what needs attention, so it renders empty (and hides) when all is quiet.
+            "sessions_badge": " ".join(badge),
+        }
+
+    def _session_state(self) -> str:
+        """The most pressing session state, for the label's state class."""
+        counts = count_sessions(self._sessions)
+        if counts[STATUS_WAITING]:
+            return STATUS_WAITING
+        if counts[STATUS_WORKING]:
+            return STATUS_WORKING
+        return STATUS_IDLE
+
+    def _sessions_summary_text(self) -> str:
+        counts = count_sessions(self._sessions)
+        if not counts["total"]:
+            return "None running"
+        parts = [f"{counts['total']} open"]
+        if counts[STATUS_WORKING]:
+            parts.append(f"{counts[STATUS_WORKING]} working")
+        if counts[STATUS_WAITING]:
+            parts.append(f"{counts[STATUS_WAITING]} waiting")
+        return " · ".join(parts)
 
     def _set_refresh_feedback(self, text: str, state: str) -> None:
         if not is_valid_qobject(self._refresh_status):
@@ -353,15 +517,8 @@ class CodexUsageWidget(BaseWidget):
             return f"{seconds // 60}m ago"
         return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
 
-    @staticmethod
-    def _level_class(remaining: Any) -> str:
-        if not isinstance(remaining, (int, float)):
-            return "unknown"
-        if remaining <= 20:
-            return "critical"
-        if remaining <= 50:
-            return "low"
-        return "good"
+    def _level(self, window: dict[str, Any]) -> str:
+        return level_class(window.get("used"), self.config.warn_percent, self.config.crit_percent)
 
     def _format_values(self) -> dict[str, str]:
         primary = self._window("primary")
@@ -385,6 +542,7 @@ class CodexUsageWidget(BaseWidget):
             "plan": str(self._data.get("plan") or "--"),
             "credits": str(self._data.get("credits") if self._data.get("credits") is not None else "--"),
             "stale": self.config.stale_icon if self._data.get("stale") else "",
+            **self._session_values(),
         }
 
     def _build_header_icon(self) -> QLabel | None:
@@ -464,6 +622,11 @@ class CodexUsageWidget(BaseWidget):
                 rendered = text
             widget.setText(rendered)
             widget.setVisible(bool(rendered))
+            if "{sessions_" in part:
+                # .working / .waiting on the badge's own label, so waiting can stand out.
+                base = widget.property("class") or "sessions"
+                base = " ".join(t for t in base.split() if t not in _SESSION_STATES)
+                widget.setProperty("class", f"{base} {self._session_state()}")
 
         active_window = self._active_window()
         if self.progress_widget:
@@ -472,6 +635,11 @@ class CodexUsageWidget(BaseWidget):
                 # Follow usage_mode so the ring never contradicts the number beside it.
                 key = "used" if self._usage_mode == "used" else "remaining"
                 self.progress_widget.set_value(self._percent_value(active_window.get(key)))
+                level_colors = self.config.progress_bar.level_colors
+                level = self._level(active_window)
+                if level_colors is not None and level in _LEVEL_COLOR_KEYS:
+                    # From the share used whichever way the ring runs, so red always means close.
+                    self.progress_widget.set_color(getattr(level_colors, _LEVEL_COLOR_KEYS[level]))
 
         if self.config.tooltip:
             primary = self._window("primary")
@@ -486,6 +654,8 @@ class CodexUsageWidget(BaseWidget):
             lines = [window_line(primary, "primary")]
             if secondary:
                 lines.append(window_line(secondary, "secondary"))
+            if self._sessions_service is not None:
+                lines.append(f"Sessions: {self._sessions_summary_text().lower()}")
             account = self._account_line()
             if account:
                 lines.append(account)
@@ -505,6 +675,10 @@ class CodexUsageWidget(BaseWidget):
         if not is_valid_qobject(self._menu):
             self._build_menu()
         self._sync_menu()
+        self._sync_sessions_section()
+        # Before show(): the pet's first frame comes from these inputs.
+        self._feed_pet()
+        self._feed_sky()
         self._menu.adjustSize()
         self._menu.setPosition(
             alignment=self.config.menu.alignment,
@@ -554,13 +728,41 @@ class CodexUsageWidget(BaseWidget):
 
         value = QLabel("--%")
         value.setProperty("class", "hero-value unknown")
-        layout.addWidget(value, 0, Qt.AlignmentFlag.AlignLeft)
 
         # A sentence rather than a chip: it has to carry both which window this is and which
         # way the number reads, and a chip repeating the window name would say half of that.
         caption = QLabel("")
         caption.setProperty("class", "hero-caption")
-        layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
+
+        if self.config.pet.enabled or self.config.sky.enabled:
+            # The pet lives beside the reading, on the same ground line as its caption, as Clawd
+            # does in the Claude popup, and the sky spans the two of them from behind.
+            if self.config.sky.enabled:
+                self._sky = SkyScene(self.config.pet.scale)
+                top = self._sky
+            else:
+                top = QFrame()
+                top.setProperty("class", "hero-top")
+            top_layout = QHBoxLayout(top)
+            top_layout.setContentsMargins(0, 0, 0, 0)
+            top_layout.setSpacing(0)
+            reading = QFrame()
+            reading.setProperty("class", "hero-reading")
+            reading_layout = QVBoxLayout(reading)
+            reading_layout.setContentsMargins(0, 0, 0, 0)
+            reading_layout.setSpacing(0)
+            reading_layout.addWidget(value, 0, Qt.AlignmentFlag.AlignLeft)
+            reading_layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
+            top_layout.addWidget(reading, 0, Qt.AlignmentFlag.AlignBottom)
+            if self.config.pet.enabled:
+                self._pet = CodexPetScene(self.config.pet.scale)
+                top_layout.addWidget(self._pet, 1, Qt.AlignmentFlag.AlignBottom)
+            else:
+                top_layout.addStretch(1)
+            layout.addWidget(top)
+        else:
+            layout.addWidget(value, 0, Qt.AlignmentFlag.AlignLeft)
+            layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
 
         progress = UsageBar(0, "unknown")
         layout.addWidget(progress)
@@ -1130,6 +1332,9 @@ class CodexUsageWidget(BaseWidget):
         self._menu_title_label = title
         header_layout.addWidget(title_stack)
         header_layout.addStretch()
+        if self.config.hearts.enabled:
+            self._hearts = HeartsView(self.config.hearts.scale)
+            header_layout.addWidget(self._hearts, 0, Qt.AlignmentFlag.AlignVCenter)
         refresh_status = QLabel("")
         refresh_status.setProperty("class", "refresh-status")
         refresh_status.setVisible(False)
@@ -1147,10 +1352,112 @@ class CodexUsageWidget(BaseWidget):
         layout.addWidget(header)
         layout.addWidget(self._build_section("primary", "Primary"))
         layout.addWidget(self._build_section("secondary", "Secondary"))
+        if self.config.sessions.enabled and self.config.sessions.show_in_menu:
+            layout.addWidget(self._build_sessions_section())
         layout.addWidget(self._build_pager())
+        if self.config.footer.enabled:
+            layout.addWidget(self._build_meta_line())
 
         # Before the first measure: the indent it removes is part of each label's width.
         align_label_text(self._menu)
+
+    def _build_sessions_section(self) -> QFrame:
+        """Sessions section: what Codex is doing right now, one row per open chat.
+
+        The same structure and classes as the Claude popup's, so one set of rules styles both.
+        """
+        frame = QFrame()
+        frame.setProperty("class", "section sessions")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        title_row = QFrame()
+        title_row.setProperty("class", "title-row")
+        title_layout = QHBoxLayout(title_row)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(0)
+        title_label = QLabel("Sessions")
+        title_label.setProperty("class", "title")
+        title_layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        title_layout.addStretch()
+        self._session_summary = QLabel("")
+        self._session_summary.setProperty("class", "summary")
+        self._session_summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        title_layout.addWidget(self._session_summary)
+        layout.addWidget(title_row)
+
+        self._session_rows = QFrame()
+        self._session_rows.setProperty("class", "session-rows")
+        self._session_layout = QGridLayout(self._session_rows)
+        self._session_layout.setContentsMargins(0, 0, 0, 0)
+        self._session_layout.setHorizontalSpacing(8)
+        self._session_layout.setVerticalSpacing(4)
+        self._session_layout.setColumnStretch(1, 1)
+        layout.addWidget(self._session_rows)
+        return frame
+
+    @staticmethod
+    def _clip(text: str, limit: int) -> str:
+        return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+    @staticmethod
+    def _session_detail(session: dict[str, Any]) -> str:
+        if session["status"] == STATUS_WORKING:
+            detail = "working"
+        elif session["status"] == STATUS_WAITING:
+            detail = f"needs you · {session['tool']}" if session["tool"] else "needs you"
+        else:
+            detail = "idle"
+        return f"{detail} · {session['app']}" if session["app"] else detail
+
+    def _sync_sessions_section(self) -> None:
+        """Rebuild the session rows and refit the popup's height to them."""
+        if self._session_layout is None:
+            return
+        sc = self.config.sessions
+        icons = {STATUS_WORKING: sc.working_icon, STATUS_WAITING: sc.waiting_icon, STATUS_IDLE: sc.idle_icon}
+        try:
+            self._session_summary.setText(self._sessions_summary_text())
+            while self._session_layout.count():
+                item = self._session_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    # Detached now (not just deleteLater) so the size hint below is current.
+                    widget.setParent(None)
+                    widget.deleteLater()
+            # Waiting first: those are the rows that want something from you.
+            order = {STATUS_WAITING: 0, STATUS_WORKING: 1, STATUS_IDLE: 2}
+            sessions = sorted(self._sessions, key=lambda s: order[s["status"]])
+            shown = sessions[: sc.max_rows]
+            for row, session in enumerate(shown):
+                marker = QLabel(icons[session["status"]])
+                marker.setProperty("class", f"marker {session['status']}")
+                name = QLabel(self._clip(session["name"], 30))
+                name.setProperty("class", "name")
+                detail = QLabel(self._clip(self._session_detail(session), 28))
+                detail.setProperty("class", f"detail {session['status']}")
+                detail.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                folder = session["cwd"] or session["name"]
+                for widget in (marker, name, detail):
+                    set_tooltip(widget, f"{session['name']}\n{folder}")
+                self._session_layout.addWidget(marker, row, 0)
+                self._session_layout.addWidget(name, row, 1)
+                self._session_layout.addWidget(detail, row, 2)
+            if len(sessions) > len(shown) and sc.max_rows:
+                more = QLabel(f"+{len(sessions) - len(shown)} more")
+                more.setProperty("class", "more")
+                self._session_layout.addWidget(more, len(shown), 1, 1, 2)
+            self._session_rows.setVisible(bool(shown))
+            align_label_text(self._session_rows)
+            if is_valid_qobject(self._menu) and self._menu.isVisible():
+                # Recompute now, then resize the height only, as _fit_page_height does.
+                self._menu.layout().activate()
+                self._menu.resize(self._menu.width(), self._menu.sizeHint().height())
+        except RuntimeError:
+            self._session_summary = None
+            self._session_rows = None
+            self._session_layout = None
 
     def _sync_reset_credits(self) -> None:
         if not is_valid_qobject(self._reset_credits_count):
@@ -1206,7 +1513,7 @@ class CodexUsageWidget(BaseWidget):
             if not window:
                 continue
             remaining = window.get("remaining")
-            level = self._level_class(remaining)
+            level = self._level(window)
             # The fill follows usage_mode so it can never contradict the number beside it:
             # showing "4% used" against a nearly-full bar reads as two different facts.
             # The colour still tracks health (how much is left), not the number's magnitude.
@@ -1260,7 +1567,8 @@ class CodexUsageWidget(BaseWidget):
                 widgets["bar"].set_ratio(float(value) / model_maximum if model_maximum else 0)
 
         if is_valid_qobject(self._plan_label):
-            line = self._account_line()
+            # With the footer on, the account is part of its closing line instead.
+            line = "" if self.config.footer.enabled else self._account_line()
             self._plan_label.setText(line)
             self._plan_label.setVisible(bool(line))
             if line:
@@ -1278,6 +1586,10 @@ class CodexUsageWidget(BaseWidget):
             if "credits" in self._detail_names:
                 self._detail_names["credits"].setVisible(has_credits)
             self._detail_widgets["updated"].setText(self._fmt_updated(self._data.get("fetched_at")))
+            # The footer says when the numbers arrived, so the row would say it twice.
+            self._detail_widgets["updated"].setVisible(not self.config.footer.enabled)
+            if "updated" in self._detail_names:
+                self._detail_names["updated"].setVisible(not self.config.footer.enabled)
             self._detail_widgets["status"].setText("Cached" if stale else "Live")
             self._detail_widgets["status"].setProperty("class", f"value status {'stale' if stale else 'live'}")
             error = str(self._data.get("error") or "") if stale else ""
@@ -1285,5 +1597,72 @@ class CodexUsageWidget(BaseWidget):
             self._detail_widgets["error"].setVisible(bool(error))
             set_tooltip(self._detail_widgets["error"], error)
             refresh_widget_style(self._detail_widgets["status"], self._detail_widgets["error"])
+        self._sync_hearts()
+        self._sync_meta()
         self._sync_reset_credits()
         self._sync_pager()
+
+    def _sync_hearts(self) -> None:
+        """The header hearts follow the main window, whatever its length (a week on some plans)."""
+        if self._hearts is None:
+            return
+        primary = self._window("primary")
+        used = primary.get("used")
+        used = float(used) if isinstance(used, (int, float)) else None
+        try:
+            self._hearts.set_state(
+                heart_halves(used), percent=used, window=self._window_phrase(primary.get("duration_mins"))
+            )
+        except RuntimeError:
+            self._hearts = None
+
+    def _stale_after(self) -> int:
+        configured = self.config.footer.stale_after
+        if configured:
+            return configured
+        # Serving from cache is normal for up to cache_ttl, so stale starts past that.
+        return max(3 * self.config.update_interval, self.config.cache_ttl + 2 * self.config.update_interval)
+
+    def _build_meta_line(self) -> QFrame:
+        """Closing line: whose plan these numbers are, and how fresh they are."""
+        frame = QFrame()
+        frame.setProperty("class", "meta")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._meta_account = QLabel("")
+        self._meta_account.setProperty("class", "account")
+        layout.addWidget(self._meta_account)
+        layout.addStretch()
+        self._meta_updated = QLabel("")
+        self._meta_updated.setProperty("class", "updated")
+        self._meta_updated.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._meta_updated)
+        return frame
+
+    def _sync_meta(self) -> None:
+        if self._meta_account is None:
+            return
+        try:
+            footer = self.config.footer
+            plan = str(self._data.get("plan") or "").strip().lower() if footer.show_plan else ""
+            email = str(self._data.get("email") or "").strip() if self.config.show_account else ""
+            signed_out = self.config.show_account and not email
+            account_text = " · ".join(p for p in (plan, "not signed in" if signed_out else email) if p)
+            self._meta_account.setText(self._clip(account_text, 40))
+            self._meta_account.setProperty("class", "account signed-out" if signed_out else "account")
+            set_tooltip(self._meta_account, self._account_tooltip())
+
+            fetched_at = self._data.get("fetched_at")
+            if not isinstance(fetched_at, (int, float)) or fetched_at <= 0:
+                updated, stale = "no data yet", True
+            else:
+                stamp = datetime.fromtimestamp(fetched_at).strftime("%H:%M")
+                stale = bool(self._data.get("stale")) or time.time() - fetched_at > self._stale_after()
+                updated = f"stale · {stamp}" if stale else f"updated {stamp}"
+            self._meta_updated.setText(updated)
+            self._meta_updated.setProperty("class", "updated stale" if stale else "updated")
+            refresh_widget_style(self._meta_account, self._meta_updated)
+        except RuntimeError:
+            self._meta_account = None
+            self._meta_updated = None

@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
+from core.utils.widgets.ai_usage.hearts import heart_halves
+
 # Clawd is 9 glyph cells by 3 rows, each cell split into 2x4 pixels: the quadrant glyphs and
 # the eyelid's lower quarter then fit the grid losslessly.
 COLS = 9
@@ -95,15 +97,6 @@ MOOD_NAMES = {
     "wait": "waiting for you",
     "dead": "limit reached",
 }
-HEALTH_NAMES = {
-    6: "full of energy",
-    5: "fine",
-    4: "a bit tired",
-    3: "tired",
-    2: "exhausted",
-    1: "barely alive",
-    0: "out of strength",
-}
 
 # Health by heart halves, applied on top of any mood: pace, tired eyes, yawns, sweat,
 # swaying and stumbling. Zero halves is the "dead" mood.
@@ -122,10 +115,6 @@ CLAUDE_FRAME_MS = 60
 FRAME_MS = 90
 
 CONFETTI_COLORS = ("#F87171", "#FBBF24", "#4ADE80", "#60A5FA", "#A78BFA", "#D77757")
-HEART_ROWS = (".##.##.", "#######", "#######", ".#####.", "..###..", "...#...")
-HEART_PX = 1.4
-HEART_W = 7 * HEART_PX
-HEART_H = len(HEART_ROWS) * HEART_PX
 
 # The soul: a translucent mini-Clawd on a thread, which leaves the mouth when he is clicked
 # while lying at the limit, hangs a moment and gets sucked back in.
@@ -411,17 +400,6 @@ def geometry(
     return Geometry(tuple(body), tuple(dark), tuple(fx), tuple(sand))
 
 
-@lru_cache(maxsize=4)
-def heart_rects(columns: int = 7) -> tuple[Rect, ...]:
-    """A pixel heart as rectangles; ``columns=4`` is the left half, for a half heart."""
-    return tuple(
-        (x * HEART_PX, y * HEART_PX, HEART_PX, HEART_PX)
-        for y, row in enumerate(HEART_ROWS)
-        for x in range(min(columns, len(row)))
-        if row[x] == "#"
-    )
-
-
 def soul_rects(height: float, t: int) -> tuple[Rect, ...]:
     """The soul at ``height`` above the mouth, swaying and pulling its thread; origin at the mouth."""
     p = SOUL_PX
@@ -445,13 +423,6 @@ def soul_rects(height: float, t: int) -> tuple[Rect, ...]:
                 x += 1
             rects.append((x0 + start * p, top + y * p, (x - start) * p, p))
     return tuple(rects)
-
-
-def heart_halves(percent: float | None) -> int | None:
-    """Heart halves (0..6) left of the 5-hour window: each is ~16.7%, empty only at 100%."""
-    if percent is None:
-        return None
-    return max(0, min(6, math.ceil(max(0.0, 100.0 - float(percent)) * 6 / 100.0)))
 
 
 def choose_mood(percent: float | None, busy: int, waiting: int, total: int) -> str:

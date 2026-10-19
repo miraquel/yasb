@@ -1,59 +1,25 @@
-"""Painters for the Claude popup's Clawd, his hearts and the sky behind him.
+"""The painter for the Claude popup's Clawd.
 
-Each draws rectangles the Qt-free ``clawd`` and ``sky`` models hand it, scaled up from their
-logical units, so all behaviour lives (and is tested) there. Every colour arrives from the
+It draws the rectangles the Qt-free ``clawd`` model hands it, scaled up from its logical
+units, so all behaviour lives (and is tested) there. Every colour arrives from the
 stylesheet as a ``-qproperty-``, the same way the prayer day ribbon takes its palette; the
 defaults below are the original widget's own, and only apply until styles.css says otherwise.
 """
 
-from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, pyqtProperty, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QImage, QLinearGradient, QPainter, QRadialGradient
+from PyQt6.QtCore import QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtWidgets import QFrame, QSizePolicy
 
 from core.utils.tooltip import set_tooltip
+from core.utils.widgets.ai_usage import hearts
+from core.utils.widgets.ai_usage.scene import colour_property, fill_rects
 from core.utils.widgets.claude_usage import clawd
 from core.utils.widgets.claude_usage.clawd import Clawd, Frame
-from core.utils.widgets.claude_usage.sky import Colour, Sky, SkyFrame
 
 # Logical height of the play area: room above his head for the "?" bubble, the floating
 # heart and the confetti, which all start a little over 20 units up.
 SCENE_HEIGHT = 50.0
 GROUND_PAD = 2.0
-HEART_GAP = 2.5
-
-
-def _colour_property(attr: str) -> pyqtProperty:
-    def getter(self) -> QColor:
-        return getattr(self, attr)
-
-    def setter(self, value: QColor) -> None:
-        setattr(self, attr, QColor(value))
-        self.update()
-
-    return pyqtProperty(QColor, getter, setter)
-
-
-def _percent_property(attr: str) -> pyqtProperty:
-    # Whole percentages rather than floats: an int -qproperty- is what QSS reliably converts.
-    def getter(self) -> int:
-        return getattr(self, attr)
-
-    def setter(self, value: int) -> None:
-        setattr(self, attr, max(0, min(100, int(value))))
-        self._render()
-        self.update()
-
-    return pyqtProperty(int, getter, setter)
-
-
-def _qcolor(colour: Colour, alpha_scale: float = 1.0) -> QColor:
-    a, r, g, b = colour
-    return QColor(r, g, b, max(0, min(255, round(a * alpha_scale))))
-
-
-def _fill(painter: QPainter, rects, dx: float, dy: float, colour: QColor) -> None:
-    for x, y, w, h in rects:
-        painter.fillRect(QRectF(dx + x, dy + y, w, h), colour)
 
 
 class ClawdScene(QFrame):
@@ -94,18 +60,18 @@ class ClawdScene(QFrame):
         self.setFixedHeight(round(SCENE_HEIGHT * scale))
         self.setMinimumWidth(round((clawd.WIDTH + 40) * scale))
 
-    bodycolor = _colour_property("_body")
-    eyecolor = _colour_property("_eyes")
-    fxcolor = _colour_property("_fx")
-    sandcolor = _colour_property("_sand")
-    sweatcolor = _colour_property("_sweat")
-    dustcolor = _colour_property("_dust")
-    zzzcolor = _colour_property("_zzz")
-    lovecolor = _colour_property("_love")
-    soulcolor = _colour_property("_soul")
-    askcolor = _colour_property("_ask")
-    cheercolor = _colour_property("_cheer")
-    notecolor = _colour_property("_note")
+    bodycolor = colour_property("_body")
+    eyecolor = colour_property("_eyes")
+    fxcolor = colour_property("_fx")
+    sandcolor = colour_property("_sand")
+    sweatcolor = colour_property("_sweat")
+    dustcolor = colour_property("_dust")
+    zzzcolor = colour_property("_zzz")
+    lovecolor = colour_property("_love")
+    soulcolor = colour_property("_soul")
+    askcolor = colour_property("_ask")
+    cheercolor = colour_property("_cheer")
+    notecolor = colour_property("_note")
 
     def sizeHint(self) -> QSize:
         return QSize(round(140 * self._scale), round(SCENE_HEIGHT * self._scale))
@@ -191,10 +157,10 @@ class ClawdScene(QFrame):
         top = ground - frame.lift - (clawd.HEIGHT - clawd.SINK)
         geo = frame.geometry
 
-        _fill(painter, geo.body, left, top, self._body)
-        _fill(painter, geo.eyes, left, top, self._eyes)
-        _fill(painter, geo.fx, left, top, self._fx)
-        _fill(painter, geo.sand, left, top, self._sand)
+        fill_rects(painter, geo.body, left, top, self._body)
+        fill_rects(painter, geo.eyes, left, top, self._eyes)
+        fill_rects(painter, geo.fx, left, top, self._fx)
+        fill_rects(painter, geo.sand, left, top, self._sand)
 
         if frame.sweat is not None:
             sx, sy, opacity = frame.sweat
@@ -230,13 +196,13 @@ class ClawdScene(QFrame):
         if frame.love is not None:
             lx, lb, opacity = frame.love
             painter.setOpacity(opacity)
-            _fill(painter, clawd.heart_rects(), lx, ground - lb - clawd.HEART_H, self._love)
+            fill_rects(painter, hearts.heart_rects(), lx, ground - lb - hearts.HEART_H, self._love)
             painter.setOpacity(1.0)
 
         if frame.soul is not None:
             rects, mx, mb, opacity = frame.soul
             painter.setOpacity(opacity)
-            _fill(painter, rects, mx, ground - mb, self._soul)
+            fill_rects(painter, rects, mx, ground - mb, self._soul)
             painter.setOpacity(1.0)
 
         for flake_x, flake_b, width, colour_index in frame.confetti:
@@ -246,184 +212,4 @@ class ClawdScene(QFrame):
             painter.setOpacity(opacity)
             painter.fillRect(QRectF(dust_x, ground - dust_b - 2, 2, 2), self._dust)
         painter.setOpacity(1.0)
-        painter.end()
-
-
-class HeartsView(QFrame):
-    """Three pixel hearts with halves: how much of the 5-hour window is left, tamagotchi-style."""
-
-    def __init__(self, scale: float = 1.35, parent: QFrame | None = None):
-        super().__init__(parent)
-        self.setProperty("class", "hearts")
-        self._scale = scale
-        self._halves: int | None = None
-        self._beat = 1.0
-        self._tip = ""
-        self._on = QColor("#F87171")
-        self._off = QColor("#3F3F46")
-        # Room around the hearts for the beat to swell into without clipping.
-        self._pad = clawd.HEART_H * 0.15
-        width = 3 * clawd.HEART_W + 2 * HEART_GAP + 2 * self._pad
-        height = clawd.HEART_H + 2 * self._pad
-        self.setFixedSize(round(width * scale), round(height * scale))
-        self.setVisible(False)
-
-    heartcolor = _colour_property("_on")
-    emptycolor = _colour_property("_off")
-
-    def set_state(self, halves: int | None, beat: float = 1.0, percent: float | None = None) -> None:
-        if percent is not None and halves is not None:
-            health = clawd.HEALTH_NAMES.get(halves, "")
-            tip = f"{health} · {max(0, round(100 - percent))}% of the 5-hour limit left"
-            # Called every animation tick; only touch the tooltip when its text changes.
-            if tip != self._tip:
-                self._tip = tip
-                set_tooltip(self, tip)
-        self.setVisible(halves is not None)
-        if halves == self._halves and beat == self._beat:
-            return
-        self._halves = halves
-        self._beat = beat
-        self.update()
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if self._halves is None:
-            return
-        painter = QPainter(self)
-        painter.scale(self._scale, self._scale)
-        full = clawd.heart_rects()
-        half = clawd.heart_rects(4)
-        for i in range(3):
-            x = self._pad + i * (clawd.HEART_W + HEART_GAP)
-            y = self._pad
-            painter.save()
-            # Beat around each heart's own centre.
-            painter.translate(x + clawd.HEART_W / 2, y + clawd.HEART_H / 2)
-            painter.scale(self._beat, self._beat)
-            painter.translate(-clawd.HEART_W / 2, -clawd.HEART_H / 2)
-            _fill(painter, full, 0, 0, self._off)
-            remaining = self._halves - 2 * i
-            if remaining >= 2:
-                _fill(painter, full, 0, 0, self._on)
-            elif remaining == 1:
-                _fill(painter, half, 0, 0, self._on)
-            painter.restore()
-        painter.end()
-
-
-class SkyScene(QFrame):
-    """The hero row's backdrop: the reading and Clawd are laid out inside it, on top of the sky.
-
-    Each tick renders the sky once into an image, and paintEvent only copies it out. Clawd
-    repaints faster than the sky moves, and every one of his repaints also repaints the strip
-    of sky under him.
-    """
-
-    def __init__(self, scale: float = 1.35, parent: QFrame | None = None):
-        super().__init__(parent)
-        self.setProperty("class", "hero-top sky")
-        self._scale = scale
-        self.model = Sky()
-        self._frame: SkyFrame | None = None
-        self._image: QImage | None = None
-        # How strong the gradient is, how opaque the sun, moon, clouds and weather are (0.7
-        # in the original), and how much of each side fades out into the panel.
-        self._strength = 100
-        self._fx_opacity = 70
-        self._edge_fade = 10
-
-        self._timer = QTimer(self)
-        self._timer.setInterval(clawd.FRAME_MS)
-        self._timer.timeout.connect(self._tick)
-
-    strength = _percent_property("_strength")
-    fxopacity = _percent_property("_fx_opacity")
-    edgefade = _percent_property("_edge_fade")
-
-    def set_tip(self, text: str) -> None:
-        set_tooltip(self, text)
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        self._tick()
-        self._timer.start()
-
-    def hideEvent(self, event):
-        self._timer.stop()
-        super().hideEvent(event)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.isVisible():
-            self._tick()
-
-    def _tick(self) -> None:
-        self._frame = self.model.step(self.width() / self._scale, self.height() / self._scale)
-        self._render()
-        self.update()
-
-    def _render(self) -> None:
-        frame = self._frame
-        w, h = self.width(), self.height()
-        if frame is None or w <= 0 or h <= 0:
-            self._image = None
-            return
-        dpr = self.devicePixelRatioF()
-        image = QImage(round(w * dpr), round(h * dpr), QImage.Format.Format_ARGB32_Premultiplied)
-        image.setDevicePixelRatio(dpr)
-        image.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(image)
-
-        strength = self._strength / 100
-        sky = QLinearGradient(0, 0, 0, h)
-        sky.setColorAt(0, _qcolor(frame.top, strength))
-        sky.setColorAt(1, _qcolor(frame.bottom, strength))
-        painter.fillRect(QRectF(0, 0, w, h), sky)
-
-        painter.scale(self._scale, self._scale)
-        painter.setPen(Qt.PenStyle.NoPen)
-        fx = self._fx_opacity / 100
-        for sprite in frame.sprites:
-            painter.setOpacity(fx * sprite.opacity)
-            if sprite.kind == "glow":
-                x, y, size, _ = sprite.rects[0]
-                glow = QRadialGradient(QPointF(x + size / 2, y + size / 2), size / 2)
-                glow.setColorAt(0, _qcolor(sprite.colour))
-                glow.setColorAt(1, _qcolor(sprite.colour, 0))
-                painter.setBrush(glow)
-                painter.drawEllipse(QRectF(x, y, size, size))
-            elif sprite.kind == "fog":
-                x, y, fw, fh = sprite.rects[0]
-                band = QLinearGradient(x, 0, x + fw, 0)
-                band.setColorAt(0, _qcolor(sprite.colour, 0))
-                band.setColorAt(0.5, _qcolor(sprite.colour))
-                band.setColorAt(1, _qcolor(sprite.colour, 0))
-                painter.fillRect(QRectF(x, y, fw, fh), band)
-            else:
-                colour = _qcolor(sprite.colour)
-                for rect in sprite.rects:
-                    painter.fillRect(QRectF(*rect), colour)
-        painter.setOpacity(1.0)
-        painter.resetTransform()
-
-        fade = self._edge_fade / 100
-        if fade > 0:
-            # Fade both sides into the panel, so the sky has no hard edge.
-            mask = QLinearGradient(0, 0, w, 0)
-            mask.setColorAt(0, QColor(0, 0, 0, 0))
-            mask.setColorAt(min(fade, 0.5), QColor(0, 0, 0, 255))
-            mask.setColorAt(max(1 - fade, 0.5), QColor(0, 0, 0, 255))
-            mask.setColorAt(1, QColor(0, 0, 0, 0))
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-            painter.fillRect(QRectF(0, 0, w, h), mask)
-        painter.end()
-        self._image = image
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if self._image is None:
-            return
-        painter = QPainter(self)
-        painter.drawImage(QPointF(0, 0), self._image)
         painter.end()

@@ -1,4 +1,4 @@
-"""Weather for the Claude popup's sky.
+"""Weather for the AI usage popups' sky.
 
 Asks Open-Meteo (https://open-meteo.com) for the current WMO weather code, temperature and
 wind, and switches to met.no (https://api.met.no) for good once Open-Meteo stops answering, as

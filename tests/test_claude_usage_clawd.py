@@ -18,6 +18,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from core.utils.widgets.ai_usage import hearts  # noqa: E402
 from core.utils.widgets.claude_usage import clawd  # noqa: E402
 from core.utils.widgets.claude_usage.clawd import Clawd, choose_mood, geometry, heart_halves  # noqa: E402
 from core.widgets.services.claude_usage.claude_api import plan_name  # noqa: E402
@@ -108,9 +109,9 @@ class HeartsTests(unittest.TestCase):
         self.assertIsNone(heart_halves(None))
 
     def test_half_heart_is_left_four_columns(self):
-        half = clawd.heart_rects(4)
+        half = hearts.heart_rects(4)
         self.assertTrue(half)
-        self.assertTrue(all(x < 4 * clawd.HEART_PX for x, _, _, _ in half))
+        self.assertTrue(all(x < 4 * hearts.HEART_PX for x, _, _, _ in half))
 
 
 class MoodTests(unittest.TestCase):
