@@ -1,18 +1,19 @@
-"""Painters for the Claude popup's Clawd and his hearts.
+"""Painters for the Claude popup's Clawd, his hearts and the sky behind him.
 
-Both draw rectangles the Qt-free ``clawd`` model hands them, scaled up from its logical
-units, so all behaviour lives (and is tested) there. Every colour arrives from the stylesheet
-as a ``-qproperty-``, the same way the prayer day ribbon takes its palette; the defaults below
-are the original widget's own, and only apply until styles.css says otherwise.
+Each draws rectangles the Qt-free ``clawd`` and ``sky`` models hand it, scaled up from their
+logical units, so all behaviour lives (and is tested) there. Every colour arrives from the
+stylesheet as a ``-qproperty-``, the same way the prayer day ribbon takes its palette; the
+defaults below are the original widget's own, and only apply until styles.css says otherwise.
 """
 
-from PyQt6.QtCore import QRectF, QSize, Qt, QTimer, pyqtProperty, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, pyqtProperty, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QImage, QLinearGradient, QPainter, QRadialGradient
 from PyQt6.QtWidgets import QFrame, QSizePolicy
 
 from core.utils.tooltip import set_tooltip
 from core.utils.widgets.claude_usage import clawd
 from core.utils.widgets.claude_usage.clawd import Clawd, Frame
+from core.utils.widgets.claude_usage.sky import Colour, Sky, SkyFrame
 
 # Logical height of the play area: room above his head for the "?" bubble, the floating
 # heart and the confetti, which all start a little over 20 units up.
@@ -30,6 +31,24 @@ def _colour_property(attr: str) -> pyqtProperty:
         self.update()
 
     return pyqtProperty(QColor, getter, setter)
+
+
+def _percent_property(attr: str) -> pyqtProperty:
+    # Whole percentages rather than floats: an int -qproperty- is what QSS reliably converts.
+    def getter(self) -> int:
+        return getattr(self, attr)
+
+    def setter(self, value: int) -> None:
+        setattr(self, attr, max(0, min(100, int(value))))
+        self._render()
+        self.update()
+
+    return pyqtProperty(int, getter, setter)
+
+
+def _qcolor(colour: Colour, alpha_scale: float = 1.0) -> QColor:
+    a, r, g, b = colour
+    return QColor(r, g, b, max(0, min(255, round(a * alpha_scale))))
 
 
 def _fill(painter: QPainter, rects, dx: float, dy: float, colour: QColor) -> None:
@@ -50,6 +69,7 @@ class ClawdScene(QFrame):
         self._frame: Frame | None = None
         self._mouse_x: float | None = None
         self._entered = False
+        self._tip_extra = ""
 
         self._body = QColor("#D77757")
         self._eyes = QColor("#141416")
@@ -93,7 +113,19 @@ class ClawdScene(QFrame):
     # ------------------------------------------------------------------ driving ----
     def set_inputs(self, percent, busy: int, waiting: int, total: int, reset_at: float | None) -> None:
         self.model.set_inputs(percent, busy, waiting, total, reset_at)
-        set_tooltip(self, f"Clawd is {self.model.mood_text()}")
+        self._sync_tip()
+
+    def set_tip_extra(self, text: str) -> None:
+        """Lines under Clawd's own: the sky's weather, since he covers most of the sky."""
+        if text != self._tip_extra:
+            self._tip_extra = text
+            self._sync_tip()
+
+    def _sync_tip(self) -> None:
+        tip = f"Clawd is {self.model.mood_text()}"
+        if self._tip_extra:
+            tip += f"\n{self._tip_extra}"
+        set_tooltip(self, tip)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -277,4 +309,121 @@ class HeartsView(QFrame):
             elif remaining == 1:
                 _fill(painter, half, 0, 0, self._on)
             painter.restore()
+        painter.end()
+
+
+class SkyScene(QFrame):
+    """The hero row's backdrop: the reading and Clawd are laid out inside it, on top of the sky.
+
+    Each tick renders the sky once into an image, and paintEvent only copies it out. Clawd
+    repaints faster than the sky moves, and every one of his repaints also repaints the strip
+    of sky under him.
+    """
+
+    def __init__(self, scale: float = 1.35, parent: QFrame | None = None):
+        super().__init__(parent)
+        self.setProperty("class", "hero-top sky")
+        self._scale = scale
+        self.model = Sky()
+        self._frame: SkyFrame | None = None
+        self._image: QImage | None = None
+        # How strong the gradient is, how opaque the sun, moon, clouds and weather are (0.7
+        # in the original), and how much of each side fades out into the panel.
+        self._strength = 100
+        self._fx_opacity = 70
+        self._edge_fade = 10
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(clawd.FRAME_MS)
+        self._timer.timeout.connect(self._tick)
+
+    strength = _percent_property("_strength")
+    fxopacity = _percent_property("_fx_opacity")
+    edgefade = _percent_property("_edge_fade")
+
+    def set_tip(self, text: str) -> None:
+        set_tooltip(self, text)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._tick()
+        self._timer.start()
+
+    def hideEvent(self, event):
+        self._timer.stop()
+        super().hideEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.isVisible():
+            self._tick()
+
+    def _tick(self) -> None:
+        self._frame = self.model.step(self.width() / self._scale, self.height() / self._scale)
+        self._render()
+        self.update()
+
+    def _render(self) -> None:
+        frame = self._frame
+        w, h = self.width(), self.height()
+        if frame is None or w <= 0 or h <= 0:
+            self._image = None
+            return
+        dpr = self.devicePixelRatioF()
+        image = QImage(round(w * dpr), round(h * dpr), QImage.Format.Format_ARGB32_Premultiplied)
+        image.setDevicePixelRatio(dpr)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+
+        strength = self._strength / 100
+        sky = QLinearGradient(0, 0, 0, h)
+        sky.setColorAt(0, _qcolor(frame.top, strength))
+        sky.setColorAt(1, _qcolor(frame.bottom, strength))
+        painter.fillRect(QRectF(0, 0, w, h), sky)
+
+        painter.scale(self._scale, self._scale)
+        painter.setPen(Qt.PenStyle.NoPen)
+        fx = self._fx_opacity / 100
+        for sprite in frame.sprites:
+            painter.setOpacity(fx * sprite.opacity)
+            if sprite.kind == "glow":
+                x, y, size, _ = sprite.rects[0]
+                glow = QRadialGradient(QPointF(x + size / 2, y + size / 2), size / 2)
+                glow.setColorAt(0, _qcolor(sprite.colour))
+                glow.setColorAt(1, _qcolor(sprite.colour, 0))
+                painter.setBrush(glow)
+                painter.drawEllipse(QRectF(x, y, size, size))
+            elif sprite.kind == "fog":
+                x, y, fw, fh = sprite.rects[0]
+                band = QLinearGradient(x, 0, x + fw, 0)
+                band.setColorAt(0, _qcolor(sprite.colour, 0))
+                band.setColorAt(0.5, _qcolor(sprite.colour))
+                band.setColorAt(1, _qcolor(sprite.colour, 0))
+                painter.fillRect(QRectF(x, y, fw, fh), band)
+            else:
+                colour = _qcolor(sprite.colour)
+                for rect in sprite.rects:
+                    painter.fillRect(QRectF(*rect), colour)
+        painter.setOpacity(1.0)
+        painter.resetTransform()
+
+        fade = self._edge_fade / 100
+        if fade > 0:
+            # Fade both sides into the panel, so the sky has no hard edge.
+            mask = QLinearGradient(0, 0, w, 0)
+            mask.setColorAt(0, QColor(0, 0, 0, 0))
+            mask.setColorAt(min(fade, 0.5), QColor(0, 0, 0, 255))
+            mask.setColorAt(max(1 - fade, 0.5), QColor(0, 0, 0, 255))
+            mask.setColorAt(1, QColor(0, 0, 0, 0))
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+            painter.fillRect(QRectF(0, 0, w, h), mask)
+        painter.end()
+        self._image = image
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._image is None:
+            return
+        painter = QPainter(self)
+        painter.drawImage(QPointF(0, 0), self._image)
         painter.end()
