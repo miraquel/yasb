@@ -9,12 +9,75 @@ normalized result is cached when Codex is temporarily unavailable.
 
 - A recent Codex CLI available in `PATH` (or configured with `codex_path`).
 - A ChatGPT-backed Codex login. Run `codex login` once if Codex is not already signed in.
+- **For live sessions and the pet's moods: nothing extra.** Codex keeps a lock for every open
+  chat in `~/.codex/thread-writer-locks` and its turn history in its own databases, and the
+  widget reads them read-only.
+- **For the `?` when Codex waits for your approval (optional):** a small Codex hook that ships
+  with YASB, added to `~/.codex/config.toml` and trusted once in Codex. It needs a Codex version
+  with hooks (on by default in recent versions) and YASB installed in its default folder, or the
+  script path changed to match. See [Waiting for approval](#waiting-for-approval-optional).
+- **For live weather behind the pet (optional):** your latitude and longitude, and internet
+  access to Open-Meteo (or met.no). No key is needed.
 
 The widget reuses the login managed by Codex itself. No additional login is needed on a machine
 where the CLI already works. API-key-only authentication may not expose ChatGPT subscription
 rate limits.
 
 ![Codex Usage widget in the YASB bar](../assets/5c5e8e22-f3da-4de7-b811-dbf41e87f5ba.png)
+
+## Quick start
+
+1. Add the widget to the `widgets` section of `config.yaml`:
+
+    ```yaml
+    codex_usage:
+      type: "yasb.codex_usage.CodexUsageWidget"
+      options:
+        label: "Codex {primary_value}% {mode}"
+        label_alt: "Codex {secondary_window} {secondary_value}% {mode}"
+    ```
+
+2. Put it on a bar, for example `widgets: right: ["codex_usage"]` under your bar in `bars`.
+3. Save. YASB reloads by itself while `watch_config` is on (the default). The label shows `--`
+   until Codex answers the first request.
+
+To add the pet, the live sessions, the hearts, the footer and the sky, turn each one on. The
+`{sessions_badge}` placeholder puts the session count on the bar:
+
+```yaml
+codex_usage:
+  type: "yasb.codex_usage.CodexUsageWidget"
+  options:
+    label: "Codex {primary_value}% {mode} <span class='sessions'>{sessions_badge}</span>"
+    pet:
+      enabled: true
+    sessions:
+      enabled: true
+    hearts:
+      enabled: true
+    footer:
+      enabled: true
+    sky:
+      enabled: true
+      latitude: 51.5072      # your own coordinates, in decimal degrees
+      longitude: -0.1276
+```
+
+Then, if you want the `?` while Codex asks for approval, add the hook as described in
+[Waiting for approval](#waiting-for-approval-optional).
+
+## Using the widget
+
+- **Left click** opens the popup: the rate-limit windows with their reset times, the extras you
+  turned on, and tabs for Overview, Resets, Models and Activity. Left click again to close it.
+- **Right click** switches the bar text between `label` and `label_alt` (the main window and
+  the second one). The progress bar follows it.
+- **Middle click** refreshes now, without opening the popup.
+- **The sessions badge** on the bar: `▶2` means two chats are working, `?1` means one is waiting
+  for your approval (with the hook in place). It is empty while everything is idle.
+- **In the popup** the sessions are listed with the ones that wait first (`needs you · <tool>`),
+  each with the app that started it. Click the pet and it waves. The pet and the sky only move
+  while the popup is open.
 
 ## Example Configuration
 
@@ -656,8 +719,18 @@ commandWindows = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Pr
 async = true
 ```
 
-Then trust the hooks once with `/hooks` in Codex (trust is tied to the hook, so it is asked again
-if the script changes). Sessions run with approvals off (`--yolo`, `approval_mode = never`) never
+Then trust the hooks once. Codex does not run a new hook until you do: the next time you start
+`codex` it shows **Hooks need review - 3 hooks are new or changed**. Choose **Trust all and
+continue**, or **Review hooks** to look at them first. You can also open the list later with
+`/hooks`. Trust is tied to the hook, so Codex asks again if the script changes, for example
+after a YASB update.
+
+To check it works: run Codex with approvals on (for example
+`codex --ask-for-approval on-request --sandbox read-only`), ask it to create a file, and while it
+asks, a file appears in `%LOCALAPPDATA%\YASB\codex-waiting` and the badge shows `?1`. Answering
+clears both within a couple of seconds.
+
+Sessions run with approvals off (`--yolo`, `approval_mode = never`) never
 ask, so they never show as waiting. Sessions run through Codex's app-server (the desktop app,
 Claude Code's Codex plugin) may show *working* instead of *waiting* if Codex does not run hooks
 for them.
@@ -692,3 +765,16 @@ The sessions section and the footer use the Claude popup's classes, so their rul
 - `Codex CLI was not found`: install Codex, add it to `PATH`, or set `codex_path` to its full path.
 - `--` or a stale warning: run `codex` in a terminal and complete ChatGPT login, then middle-click the widget.
 - Shared/public configuration: do not bundle a user's `.codex` directory or credentials. Each user must install and sign in to Codex under their own Windows account.
+- No `?` while Codex asks for approval: the hook is missing or not trusted yet (start `codex` and
+  choose **Trust all and continue**, or use `/hooks`), the chat runs with approvals off, or YASB
+  is installed somewhere other than `C:\Program Files\YASB` (fix the script path in
+  `config.toml`). While Codex asks, a file should appear in `%LOCALAPPDATA%\YASB\codex-waiting`;
+  if none does, the hook did not run.
+- `?1` stays after you closed the Codex window: in recent Codex versions every chat runs in
+  Codex's background app-server, and the window is only a view of it. Closing the window leaves
+  the chat waiting on its question there, so the badge is right. Reopen it with `codex resume`,
+  pick the chat and answer (or press Esc to decline); the `?` clears within a couple of seconds.
+- No sessions listed: turn on `sessions` (or `pet`, which reads them too). A chat that has been
+  idle longer than `sessions.idle_minutes` (30 by default) is hidden, even though Codex keeps it
+  loaded.
+- The pet or the sky stands still: they only move while the popup is open.

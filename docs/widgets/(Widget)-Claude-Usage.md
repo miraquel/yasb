@@ -10,6 +10,82 @@ The data is read from the same OAuth credentials the Claude Code CLI uses
 (`~/.claude/.credentials.json`) and fetched from Anthropic's usage endpoint. No API key or
 extra configuration is required as long as you are signed in to Claude Code.
 
+## Requirements
+
+What to have in place before you add the widget:
+
+- **Claude Code, signed in with a Claude subscription** (Pro, Max, Team). Run `claude` in a
+  terminal and sign in once; the widget reads the sign-in Claude Code keeps, so there is nothing
+  to copy into YASB. Without a sign-in the bar shows `--`. See [Authentication](#authentication).
+- **Claude Code used now and then.** Only Claude Code renews its sign-in token. After a long
+  break the numbers go stale (the `{stale}` glyph) until you run any Claude Code command.
+- **For live sessions and Clawd's moods: nothing extra.** Claude Code records every running
+  session in `<config dir>\sessions\<pid>.json`, as *busy* while it works and *waiting* while a
+  permission prompt or a question waits for you, and the widget reads those files. Every
+  `~/.claude*` folder is watched, so a second account under `CLAUDE_CONFIG_DIR` (for example
+  `~/.claude-personal`) is counted too.
+- **For live weather behind Clawd (optional):** your latitude and longitude, and internet access
+  to Open-Meteo (or met.no, its fallback). No key is needed.
+- **For token history (optional): nothing extra.** It reads Claude Code's local transcripts.
+
+## Quick start
+
+1. Add the widget to the `widgets` section of `config.yaml`:
+
+    ```yaml
+    claude_usage:
+      type: "yasb.claude_usage.ClaudeUsageWidget"
+      options:
+        label: "Claude {five_hour_value}% {mode}"
+        label_alt: "Claude 7d {seven_day_value}% {mode}"
+    ```
+
+2. Put it on a bar, for example `widgets: right: ["claude_usage"]` under your bar in `bars`.
+3. Save. YASB reloads by itself while `watch_config` is on (the default). The label shows `--`
+   for a few seconds until the first reading arrives.
+
+To add Clawd, the live sessions, the hearts, the footer and the sky, turn each one on. The
+`{sessions_badge}` placeholder puts the session count on the bar:
+
+```yaml
+claude_usage:
+  type: "yasb.claude_usage.ClaudeUsageWidget"
+  options:
+    label: "Claude {five_hour_value}% {mode} <span class='sessions'>{sessions_badge}</span>"
+    clawd:
+      enabled: true
+    sessions:
+      enabled: true
+    hearts:
+      enabled: true
+    footer:
+      enabled: true
+    sky:
+      enabled: true
+      latitude: 51.5072      # your own coordinates, in decimal degrees
+      longitude: -0.1276
+```
+
+The [Example Style](#example-style) section has rules for every part of the popup.
+
+## Using the widget
+
+- **Left click** opens the popup: the 5-hour and 7-day windows with their reset times, any
+  per-model weekly cap, and the extras you turned on. The pin button in its header keeps it open
+  and lets you drag it.
+- **Right click** switches the bar text between `label` (5-hour) and `label_alt` (7-day). The
+  progress ring, when on, follows it.
+- **Middle click** does nothing by default. Set `callbacks.on_middle` to `refresh` (re-fetch
+  now) or `toggle_usage_mode` (switch between *used* and *left*).
+- **The sessions badge** on the bar: `▶2` means two sessions are working, `?1` means one needs
+  you (a permission prompt or a question). It is empty while everything is idle. *Waiting* shows
+  a few seconds after a prompt opens, once Claude Code records it.
+- **In the popup** the sessions are listed with the ones that need you first (`needs you ·
+  permission prompt`). Click Clawd and he does a trick. Clawd and the sky only move while the
+  popup is open.
+
+## Options
+
 | Option            | Type    | Default | Description |
 |-------------------|---------|---------|-------------|
 | `label`           | string  | `'Claude {five_hour}%'` | The format string for the label. Supports the placeholders below. |
@@ -561,4 +637,38 @@ colours to taste.
 
 ## Example Widget
 <img width="286" height="698" alt="image" src="https://github.com/user-attachments/assets/90166652-9dfa-4959-a185-bf28f18d20ba" />
+
+## Troubleshooting
+
+**The bar shows `--`.**
+No sign-in was found. Run `claude` in a terminal and sign in with your Claude subscription (or
+`/login` inside it), then wait for the next refresh. If you keep Claude Code's files somewhere
+other than `~/.claude`, start YASB with `CLAUDE_CONFIG_DIR` pointing there.
+
+**A warning glyph (`{stale}`) sits next to the numbers.**
+Claude Code's sign-in token has expired, and only Claude Code can renew it. Run any Claude Code
+command; the widget picks the fresh token up at its next fetch.
+
+**The numbers stop changing for a while.**
+The usage endpoint is rate-limited. On an error the widget keeps showing the last cached values
+instead of going blank. Keep `cache_ttl` at 120 seconds or more.
+
+**No sessions are listed.**
+Turn on `sessions` (or `clawd`, which reads the sessions too). Check that your Claude config
+folder has a `sessions` folder with `<pid>.json` files while Claude Code runs. A config folder
+whose name does not start with `.claude` in your home folder has to be listed in `sessions.dirs`.
+A Claude Code started from inside another Claude Code session (it inherits
+`CLAUDE_CODE_CHILD_SESSION`) writes no session file, so it is not counted.
+
+**A prompt is open but the badge shows no `?`.**
+Give it a few seconds: Claude Code records *waiting* shortly after the prompt opens, and the
+widget reads the files every `sessions.poll_interval` seconds (2 by default).
+
+**Clawd or the sky stands still.**
+They only move while the popup is open, which keeps the bar light.
+
+**The sky shows no weather.**
+Set both `latitude` and `longitude` and leave `weather` on. The weather comes from
+`api.open-meteo.com`, or `api.met.no` when that fails, so a firewall that blocks both leaves the
+sky following the clock only.
 
