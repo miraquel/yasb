@@ -19,6 +19,41 @@ The data comes from DeepSeek's `GET /user/balance` endpoint using your platform 
 - A DeepSeek platform API key from [platform.deepseek.com](https://platform.deepseek.com).
 - Pay-as-you-go (prepaid balance) access. The endpoint reports a balance, not a subscription quota.
 
+## Quick start
+
+1. Create an API key on [platform.deepseek.com](https://platform.deepseek.com) (API keys page).
+2. Store it as a user environment variable, outside your config, then restart YASB so it sees
+   the new variable:
+
+    ```powershell
+    [Environment]::SetEnvironmentVariable("YASB_DEEPSEEK_API_KEY", "sk-...", "User")
+    ```
+
+3. Add the widget to the `widgets` section of `config.yaml`:
+
+    ```yaml
+    deepseek_usage:
+      type: "yasb.deepseek_usage.DeepSeekUsageWidget"
+      options:
+        label: "DeepSeek {balance}"
+        label_alt: "DeepSeek {today_spend} today"
+    ```
+
+4. Put it on a bar, for example `widgets: right: ["deepseek_usage"]` under your bar in `bars`.
+
+The balance shows at once. Spend starts at zero and grows from the next reading on, because it
+is worked out from how the balance drops between readings (see [Spend history](#spend-history)).
+
+## Using the widget
+
+- **Left click** opens the popup: the balance split into topped-up and granted money, the
+  spend chart with its Today / Week / Month / Year toggle, and the budget if you set one.
+- **Right click** switches the bar text between `label` (the balance) and `label_alt` (today's
+  spend).
+- **Middle click** refreshes now, without opening the popup.
+
+## Options
+
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `label` | string | `'DeepSeek {balance}'` | The format string for the label. Supports the placeholders below. |
