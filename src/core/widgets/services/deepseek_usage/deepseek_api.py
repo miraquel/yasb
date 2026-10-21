@@ -17,7 +17,7 @@ import os
 import time
 import urllib.error
 import urllib.request
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 
@@ -87,7 +87,8 @@ def select_balance(payload: dict[str, Any], preferred_currency: str = "auto") ->
     holding actual money, so a zeroed-out secondary currency never hides the real
     balance; an explicit currency wins when present, and falls back to auto.
     """
-    entries = [entry for entry in (payload.get("balance_infos") or []) if isinstance(entry, dict)]
+    infos: list[Any] = payload.get("balance_infos") or []
+    entries = [cast(dict[str, Any], entry) for entry in infos if isinstance(entry, dict)]
     if not entries:
         return {}
 
@@ -114,7 +115,7 @@ def _read_cache(path: str) -> dict[str, Any] | None:
     try:
         with open(path, encoding="utf-8") as cache_file:
             value = json.load(cache_file)
-        return value if isinstance(value, dict) else None
+        return cast(dict[str, Any], value) if isinstance(value, dict) else None
     except OSError, ValueError:
         return None
 
@@ -256,7 +257,7 @@ class DeepSeekUsageService(QObject):
 
     data_ready = pyqtSignal(dict)
 
-    _instances: ClassVar[dict[tuple, DeepSeekUsageService]] = {}
+    _instances: ClassVar[dict[tuple[int, int, str, str, bool], DeepSeekUsageService]] = {}
 
     @classmethod
     def get_instance(
@@ -291,7 +292,7 @@ class DeepSeekUsageService(QObject):
         api_key: str,
         preferred_currency: str,
         count_granted: bool,
-        _key: tuple,
+        _key: tuple[int, int, str, str, bool],
     ):
         super().__init__()
         self._key = _key

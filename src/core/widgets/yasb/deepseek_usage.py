@@ -1,9 +1,11 @@
 import re
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from functools import partial
+from typing import Any, cast
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QCloseEvent, QResizeEvent
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from core.utils.qobject import is_valid_qobject
@@ -87,8 +89,8 @@ class UsageBar(QFrame):
         # way the stylesheet engine does, otherwise the fill sits 2px high.
         self._fill.setGeometry(0, max(0, (self.height() - height + 1) // 2), fill_width, height)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
         self._update_fill()
 
 
@@ -147,9 +149,9 @@ class DeepSeekUsageWidget(BaseWidget):
         except RuntimeError:
             pass
 
-    def closeEvent(self, event):
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
         self._release_service()
-        super().closeEvent(event)
+        super().closeEvent(a0)
 
     def _on_data(self, data: dict[str, Any]) -> None:
         self._data = data
@@ -166,6 +168,7 @@ class DeepSeekUsageWidget(BaseWidget):
     def _summarize(self, ledger: Any) -> dict[str, Any]:
         if not self.config.spend_history.enabled or not isinstance(ledger, dict):
             return dict(_EMPTY_SUMMARY)
+        ledger = cast(dict[str, Any], ledger)
         return summarize(ledger or empty_ledger(), week_starts_on=self.config.spend_history.week_starts_on)
 
     # -- formatting ----------------------------------------------------------
@@ -345,15 +348,14 @@ class DeepSeekUsageWidget(BaseWidget):
         ``persistent=True`` keeps ``PopupWidget`` from tearing it down on hide, so reopening
         never redoes the widget-tree construction and layout pass.
         """
-        if not is_valid_qobject(self._menu):
-            self._build_menu()
-        self._menu.setPosition(
+        menu = self._menu if is_valid_qobject(self._menu) else self._build_menu()
+        menu.setPosition(
             alignment=self.config.menu.alignment,
             direction=self.config.menu.direction,
             offset_left=self.config.menu.offset_left,
             offset_top=self.config.menu.offset_top,
         )
-        self._menu.show()
+        menu.show()
         # The popup ignores refreshes while hidden (see the sync methods' isVisible() guard), so
         # push the latest data in now rather than showing whatever was true when it last closed.
         self._sync_balance_section()
@@ -509,7 +511,7 @@ class DeepSeekUsageWidget(BaseWidget):
         for key, text in _SPEND_PERIODS:
             button = QPushButton(text)
             button.setProperty("class", "period-btn")
-            button.clicked.connect(lambda _=False, period=key: self._select_period(period))
+            button.clicked.connect(partial(self._select_period, key))
             toggle_layout.addWidget(button)
             self._period_buttons[key] = button
         layout.addWidget(toggle)
@@ -629,7 +631,7 @@ class DeepSeekUsageWidget(BaseWidget):
         except RuntimeError:
             self._footer_label = None
 
-    def _build_menu(self) -> None:
+    def _build_menu(self) -> PopupWidget:
         self._menu = PopupWidget(
             self,
             self.config.menu.blur,
@@ -695,7 +697,8 @@ class DeepSeekUsageWidget(BaseWidget):
             pin_btn.setProperty("class", "pin-btn pinned" if checked else "pin-btn")
             set_tooltip(pin_btn, "Unpin this window" if checked else "Pin this window")
             refresh_widget_style(pin_btn)
-            self._menu.set_pinned(checked)
+            if self._menu is not None:
+                self._menu.set_pinned(checked)
 
         pin_btn.toggled.connect(on_pin_toggled)
         header_layout.addWidget(pin_btn)
@@ -718,3 +721,4 @@ class DeepSeekUsageWidget(BaseWidget):
         # Lock the width after the first layout so switching periods only changes the height,
         # keeping the bars a constant length between periods.
         self._menu.setFixedWidth(self._menu.width())
+        return self._menu

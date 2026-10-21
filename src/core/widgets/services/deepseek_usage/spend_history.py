@@ -27,7 +27,7 @@ import math
 import os
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, cast
 
 from core.utils.system import app_data_path
 
@@ -84,6 +84,8 @@ def compute_spend(previous: Any, current: Any, *, count_granted: bool = True) ->
     """
     if not isinstance(previous, dict) or not isinstance(current, dict):
         return Decimal(0)
+    previous = cast(dict[str, Any], previous)
+    current = cast(dict[str, Any], current)
     if (previous.get("currency") or "") != (current.get("currency") or ""):
         return Decimal(0)
 
@@ -122,17 +124,15 @@ def trim(ledger: dict[str, Any], now: datetime | None = None) -> None:
     now = now or datetime.now().astimezone()
     day_cutoff = (now - timedelta(days=DAILY_RETENTION_DAYS)).date()
     hour_cutoff = (now - timedelta(days=HOURLY_RETENTION_DAYS)).strftime(_HOUR_FORMAT)
+    daily: dict[str, Any] = ledger.get("daily") or {}
+    hourly: dict[str, Any] = ledger.get("hourly") or {}
 
     ledger["daily"] = {
-        key: value
-        for key, value in (ledger.get("daily") or {}).items()
-        if (parsed := _parse_day(key)) is not None and parsed >= day_cutoff
+        key: value for key, value in daily.items() if (parsed := _parse_day(key)) is not None and parsed >= day_cutoff
     }
     # Hour keys are zero-padded and big-endian, so lexical order is chronological order.
     ledger["hourly"] = {
-        key: value
-        for key, value in (ledger.get("hourly") or {}).items()
-        if _parse_hour(key) is not None and key >= hour_cutoff
+        key: value for key, value in hourly.items() if _parse_hour(key) is not None and key >= hour_cutoff
     }
 
 
@@ -150,8 +150,8 @@ def summarize(
     are daily, and Year is monthly.
     """
     now = now or datetime.now().astimezone()
-    daily = ledger.get("daily") or {}
-    hourly = ledger.get("hourly") or {}
+    daily: dict[str, Any] = ledger.get("daily") or {}
+    hourly: dict[str, Any] = ledger.get("hourly") or {}
 
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     weekday = now.weekday()  # Mon=0
@@ -206,7 +206,10 @@ def load_ledger(path: str) -> dict[str, Any]:
     except OSError, ValueError:
         return empty_ledger()
 
-    if not isinstance(data, dict) or data.get("version") != CACHE_VERSION:
+    if not isinstance(data, dict):
+        return empty_ledger()
+    data = cast(dict[str, Any], data)
+    if data.get("version") != CACHE_VERSION:
         return empty_ledger()
 
     ledger = empty_ledger()
@@ -259,7 +262,7 @@ def _parse_hour(key: Any) -> datetime | None:
 
 def _date_keys_in_range(start: datetime, end: datetime) -> list[str]:
     """Local YYYY-MM-DD keys from start's day through end's day, inclusive."""
-    keys = []
+    keys: list[str] = []
     current = start.date()
     last = end.date()
     while current <= last:
@@ -270,7 +273,7 @@ def _date_keys_in_range(start: datetime, end: datetime) -> list[str]:
 
 def _hour_keys_in_range(start: datetime, end: datetime) -> list[str]:
     """Local YYYY-MM-DDTHH keys from start's hour through end's hour, inclusive."""
-    keys = []
+    keys: list[str] = []
     current = start.replace(minute=0, second=0, microsecond=0)
     last = end.replace(minute=0, second=0, microsecond=0)
     while current <= last:
@@ -281,7 +284,7 @@ def _hour_keys_in_range(start: datetime, end: datetime) -> list[str]:
 
 def _month_keys_in_range(start: datetime, end: datetime) -> list[str]:
     """Local YYYY-MM keys from start's month through end's month, inclusive."""
-    keys = []
+    keys: list[str] = []
     year, month = start.year, start.month
     while (year, month) <= (end.year, end.month):
         keys.append(f"{year:04d}-{month:02d}")
