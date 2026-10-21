@@ -1,11 +1,9 @@
 import logging
+from typing import override
 
-import win32con
-import win32gui
-from PIL import Image
-from PyQt6 import QtCore
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QImage, QPixmap
+import PyQt6.QtCore as QtCore
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
+from PyQt6.QtGui import QKeyEvent, QMouseEvent, QPixmap, QScreen, QShowEvent, QWheelEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
@@ -16,14 +14,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.utils.icons.service import IconService, WindowIcon
 from core.utils.qobject import is_valid_qobject
 from core.utils.utilities import PopupWidget, refresh_widget_style
-from core.utils.win32.app_icons import get_icon_for_aumid, get_process_icon, get_window_icon
-from core.utils.win32.aumid import get_aumid_for_window
+from core.utils.win32.bindings.user32 import GetWindowText, IsIconic, IsWindow, enum_windows
 from core.utils.win32.utils import find_focused_screen
 from core.utils.win32.window_actions import (
     close_application,
-    force_foreground_focus,
     resolve_base_and_focus,
     restore_window,
     set_foreground,
@@ -31,9 +28,18 @@ from core.utils.win32.window_actions import (
 )
 from core.validation.widgets.yasb.window_switcher import WindowSwitcherConfig
 from core.widgets.base import BaseWidget
-from core.widgets.services.taskbar.window_manager import connect_taskbar
+from core.widgets.services.taskbar.application_window import ApplicationWindow
+from core.widgets.services.taskbar.window_manager import TaskbarWindowManager, connect_taskbar
 
 logger = logging.getLogger("window_switcher")
+
+
+class _SwitcherItem(QFrame):
+    def __init__(self, parent: QWidget, hwnd: int, title: str) -> None:
+        super().__init__(parent)
+        self.hwnd = hwnd
+        self.title = title
+        self.icon_label: QLabel | None = None
 
 
 class WindowSwitcherWidget(BaseWidget):
@@ -51,20 +57,33 @@ class WindowSwitcherWidget(BaseWidget):
         self.callback_right = self.config.callbacks.on_right
         self.callback_middle = self.config.callbacks.on_middle
 
-        self._popup = None
-        self._scroll_area = None
+        self._popup: PopupWidget | None = None
+        self._scroll_area: QScrollArea | None = None
         self._btn_w = 0
         self._btn_h = 0
         self._popup_height = 0
         self._popup_extra_w = 0
-        self._icons_cache = {}
-        self.buttons_list = []
+        self._icons = IconService.instance()
+        self._icons.icons_changed.connect(self._refresh_icons)
+        self.buttons_list: list[_SwitcherItem] = []
+        self.active_title_label: QLabel | None = None
         self.current_focus_index = -1
 
         # Tell TaskbarWindowManager to track cloaked apps globally so we can see them
         self._show_only_visible = False
 
-        self._task_manager = connect_taskbar(self)
+        self._task_manager: TaskbarWindowManager | None = None
+
+    @override
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        super().showEvent(a0)
+        # connect_taskbar() calls winId() on self.window(). Before the widget is in the bar,
+        # that is the widget itself, and Qt would make it and its siblings native windows.
+        if self._task_manager is None:
+            try:
+                self._task_manager = connect_taskbar(self)
+            except Exception as e:
+                logger.error("Failed to connect to the task manager: %s", e)
 
     def _toggle_window_switcher(self):
         if self._popup and is_valid_qobject(self._popup) and self._popup.isVisible():
@@ -102,7 +121,7 @@ class WindowSwitcherWidget(BaseWidget):
         self.current_focus_index = -1
         self.set_focused_button(0)
 
-    def _get_target_screen(self):
+    def _get_target_screen(self) -> QScreen:
         screen_mode = "active"
         for kb in self.config.keybindings:
             if kb.action == "toggle_window_switcher":
@@ -122,19 +141,17 @@ class WindowSwitcherWidget(BaseWidget):
                     return s
         return self.screen() or QApplication.primaryScreen() or QApplication.screens()[0]
 
-    def _get_sorted_windows(self):
+    def _get_sorted_windows(self) -> list[ApplicationWindow]:
+        if self._task_manager is None:
+            return []
         windows = list(self._task_manager.get_windows().values())
         taskbar_windows = [w for w in windows if w.is_taskbar_window()]
-        z_order = []
-        try:
-            win32gui.EnumWindows(lambda hwnd, _: z_order.append(hwnd) or True, 0)
-        except Exception:
-            pass
+        z_order = enum_windows()
         z_order_map = {hwnd: i for i, hwnd in enumerate(z_order)}
         taskbar_windows.sort(key=lambda w: z_order_map.get(w.hwnd, 99999))
         return taskbar_windows
 
-    def _build_overlay_popup(self, taskbar_windows):
+    def _build_overlay_popup(self, taskbar_windows: list[ApplicationWindow]):
         icon_size = self.config.icon_size
 
         main_layout = QVBoxLayout(self._popup)
@@ -155,7 +172,9 @@ class WindowSwitcherWidget(BaseWidget):
         self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll_area.setObjectName("ws_scroll")
-        self._scroll_area.viewport().setObjectName("ws_viewport")
+        viewport = self._scroll_area.viewport()
+        if viewport is not None:
+            viewport.setObjectName("ws_viewport")
 
         container = QWidget()
         container.setObjectName("ws_container")
@@ -165,7 +184,7 @@ class WindowSwitcherWidget(BaseWidget):
 
         self.buttons_list = []
         for win in taskbar_windows:
-            btn = QFrame(container)
+            btn = _SwitcherItem(container, win.hwnd, GetWindowText(win.hwnd) or win.title or "")
             btn.setProperty("class", "item")
             btn_layout = QVBoxLayout(btn)
             btn_layout.setSpacing(0)
@@ -175,13 +194,12 @@ class WindowSwitcherWidget(BaseWidget):
             icon_label = QLabel(btn)
             icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             icon_label.setFixedSize(icon_size, icon_size)
-            icon_pixmap = self._get_app_icon(win, icon_size, self._current_dpr)
+            icon_pixmap = self._get_app_icon(win.hwnd)
             if icon_pixmap:
                 icon_label.setPixmap(icon_pixmap)
             btn_layout.addWidget(icon_label)
+            btn.icon_label = icon_label
 
-            btn._hwnd = win.hwnd
-            btn._title = win32gui.GetWindowText(win.hwnd) or win.title or ""
             btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             btn.installEventFilter(self)
             self.buttons_list.append(btn)
@@ -212,62 +230,30 @@ class WindowSwitcherWidget(BaseWidget):
 
         self._update_popup_geometry(initial=True)
 
-    def _get_app_icon(self, win, icon_size: int, dpr: float = 1.0) -> QPixmap | None:
-        if icon_size <= 0:
+    def _get_app_icon(self, hwnd: int) -> QPixmap | None:
+        if self.config.icon_size <= 0:
             return None
+        return self._icons.get_icon(WindowIcon(hwnd), self.config.icon_size, self._current_dpr)
 
-        cache_key = (win.hwnd, icon_size, dpr)
-        if cache_key in self._icons_cache:
-            return self._icons_cache[cache_key]
+    def _refresh_icons(self) -> None:
+        for btn in self.buttons_list:
+            if btn.icon_label is None or not is_valid_qobject(btn.icon_label):
+                continue
+            pixmap = self._get_app_icon(btn.hwnd)
+            if pixmap:
+                btn.icon_label.setPixmap(pixmap)
 
-        physical = round(icon_size * dpr)
-
-        def pil_to_pixmap(img: Image.Image) -> QPixmap:
-            img = img.resize((physical, physical), Image.Resampling.LANCZOS).convert("RGBA")
-            pm = QPixmap.fromImage(
-                QImage(img.tobytes("raw", "RGBA"), physical, physical, QImage.Format.Format_RGBA8888)
-            )
-            pm.setDevicePixelRatio(dpr)
-            return pm
-
-        pixmap = None
-
-        aumid = get_aumid_for_window(win.hwnd)
-        if aumid:
-            img = get_icon_for_aumid(aumid, size=physical)
-            if img:
-                pixmap = pil_to_pixmap(img)
-
-        if not pixmap and win.process_pid:
-            img = get_process_icon(win.process_pid)
-            if img:
-                pixmap = pil_to_pixmap(img)
-
-        if not pixmap:
-            img = get_window_icon(win.hwnd)
-            if img:
-                pixmap = pil_to_pixmap(img)
-
-        if pixmap:
-            self._icons_cache[cache_key] = pixmap
-            # Because some icons can be really big depending on user settings
-            # we will keep only 40 icons in cache to prevent unnecessary growing.
-            if len(self._icons_cache) > 40:
-                self._icons_cache.pop(next(iter(self._icons_cache)))
-
-        return pixmap
-
-    def _switch_to_window(self, hwnd):
+    def _switch_to_window(self, hwnd: int):
         if self._popup:
             self._popup.hide_animated()
-        if not win32gui.IsWindow(hwnd):
+        if not IsWindow(hwnd):
             return
 
         def _do_focus():
             try:
                 base, focus_target = resolve_base_and_focus(hwnd)
 
-                if win32gui.IsIconic(base) or win32gui.IsIconic(hwnd):
+                if IsIconic(base) or IsIconic(hwnd):
                     restore_window(base)
                     if base != hwnd:
                         restore_window(hwnd)
@@ -277,22 +263,22 @@ class WindowSwitcherWidget(BaseWidget):
                         show_window(hwnd)
 
                 set_foreground(base)
-                QTimer.singleShot(0, lambda h=focus_target or base: force_foreground_focus(h))
+                target = focus_target or base
+                QTimer.singleShot(0, lambda: set_foreground(target))
 
             except Exception:
                 try:
-                    win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
-                    win32gui.SetActiveWindow(hwnd)
-                except Exception:
-                    try:
-                        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE if win32gui.IsIconic(hwnd) else win32con.SW_SHOW)
-                    except Exception as final_e:
-                        logger.error("Failed to switch to window %s: %s", hwnd, final_e)
+                    if IsIconic(hwnd):
+                        restore_window(hwnd)
+                    else:
+                        show_window(hwnd)
+                except Exception as final_e:
+                    logger.error("Failed to switch to window %s: %s", hwnd, final_e)
 
         QTimer.singleShot(0, _do_focus)
 
-    def _close_window(self, hwnd):
-        if not win32gui.IsWindow(hwnd):
+    def _close_window(self, hwnd: int):
+        if not IsWindow(hwnd):
             return
 
         try:
@@ -300,7 +286,7 @@ class WindowSwitcherWidget(BaseWidget):
         except Exception as e:
             logger.error("Failed to close window %s: %s", hwnd, e)
 
-        button = next((b for b in self.buttons_list if getattr(b, "_hwnd", None) == hwnd), None)
+        button = next((b for b in self.buttons_list if b.hwnd == hwnd), None)
         if button:
             index = self.buttons_list.index(button)
             self.buttons_list.remove(button)
@@ -308,20 +294,21 @@ class WindowSwitcherWidget(BaseWidget):
             button.deleteLater()
 
             if not self.buttons_list:
-                self._popup.hide_animated()
+                if self._popup is not None:
+                    self._popup.hide_animated()
                 return
 
             self.current_focus_index = -1
             self._update_popup_geometry()
             QTimer.singleShot(0, lambda: self.set_focused_button(min(index, len(self.buttons_list) - 1)))
 
-    def _update_popup_geometry(self, initial=False):
+    def _update_popup_geometry(self, initial: bool = False):
         if self._popup and self._scroll_area:
             screen_geometry = self._current_screen.geometry()
             # We will use max 90% of screen size
             max_allowed_width = screen_geometry.width() * 0.9
 
-            extra_w = getattr(self, "_popup_extra_w", 0)
+            extra_w = self._popup_extra_w
             available_w = max_allowed_width - extra_w
             max_screen_apps = max(1, int(available_w // self._btn_w)) if self._btn_w > 0 else 1
 
@@ -336,35 +323,40 @@ class WindowSwitcherWidget(BaseWidget):
                 self._popup_height = size_hint.height()
                 self._popup_extra_w = size_hint.width() - (self._btn_w * visible_apps)
 
-            popup_width = self._btn_w * visible_apps + getattr(self, "_popup_extra_w", 0)
+            popup_width = self._btn_w * visible_apps + self._popup_extra_w
             self._popup.setFixedSize(int(popup_width), self._popup_height)
             self._popup.move(
                 int((screen_geometry.width() - popup_width) // 2 + screen_geometry.x()),
                 int((screen_geometry.height() - self._popup_height) // 2 + screen_geometry.y()),
             )
 
-    def eventFilter(self, source, event):
-        if event.type() == QtCore.QEvent.Type.Wheel:
+    @override
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a1 is None:
+            return super().eventFilter(a0, a1)
+        if isinstance(a1, QWheelEvent):
             if self._scroll_area and self.buttons_list:
-                step = self._btn_w * (-1 if event.angleDelta().y() < 0 else 1)
+                step = self._btn_w * (-1 if a1.angleDelta().y() < 0 else 1)
                 bar = self._scroll_area.horizontalScrollBar()
-                bar.setValue(bar.value() - step)
+                if bar is not None:
+                    bar.setValue(bar.value() - step)
             return True
 
-        if source in self.buttons_list:
-            if event.type() == QtCore.QEvent.Type.Enter:
-                self.set_focused_button(self.buttons_list.index(source), by_mouse=True)
-            elif event.type() == QtCore.QEvent.Type.MouseButtonRelease:
-                if event.button() == Qt.MouseButton.LeftButton:
-                    self._switch_to_window(source._hwnd)
-                elif event.button() == Qt.MouseButton.RightButton:
-                    self._close_window(source._hwnd)
+        if isinstance(a0, _SwitcherItem) and a0 in self.buttons_list:
+            if a1.type() == QtCore.QEvent.Type.Enter:
+                self.set_focused_button(self.buttons_list.index(a0), by_mouse=True)
+            elif a1.type() == QtCore.QEvent.Type.MouseButtonRelease and isinstance(a1, QMouseEvent):
+                if a1.button() == Qt.MouseButton.LeftButton:
+                    self._switch_to_window(a0.hwnd)
+                elif a1.button() == Qt.MouseButton.RightButton:
+                    self._close_window(a0.hwnd)
                 return True
 
-        if event.type() == QtCore.QEvent.Type.KeyPress:
-            key = event.key()
+        if isinstance(a1, QKeyEvent) and a1.type() == QtCore.QEvent.Type.KeyPress:
+            key = a1.key()
             if key == Qt.Key.Key_Escape:
-                self._popup.hide_animated()
+                if self._popup is not None:
+                    self._popup.hide_animated()
                 return True
             if key == Qt.Key.Key_Right:
                 new_idx = min(self.current_focus_index + 1, len(self.buttons_list) - 1)
@@ -378,16 +370,16 @@ class WindowSwitcherWidget(BaseWidget):
                 return True
             if key == Qt.Key.Key_Delete:
                 if 0 <= self.current_focus_index < len(self.buttons_list):
-                    self._close_window(self.buttons_list[self.current_focus_index]._hwnd)
+                    self._close_window(self.buttons_list[self.current_focus_index].hwnd)
                 return True
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
                 if 0 <= self.current_focus_index < len(self.buttons_list):
-                    self._switch_to_window(self.buttons_list[self.current_focus_index]._hwnd)
+                    self._switch_to_window(self.buttons_list[self.current_focus_index].hwnd)
                 return True
 
-        return super().eventFilter(source, event)
+        return super().eventFilter(a0, a1)
 
-    def set_focused_button(self, index, by_mouse=False):
+    def set_focused_button(self, index: int, by_mouse: bool = False):
         if not self.buttons_list or not (0 <= index < len(self.buttons_list)):
             return
 
@@ -405,7 +397,7 @@ class WindowSwitcherWidget(BaseWidget):
         refresh_widget_style(btn)
 
         if self.active_title_label:
-            title = btn._title
+            title = btn.title
             available_w = self.active_title_label.contentsRect().width()
             if available_w > 0:
                 title = self.active_title_label.fontMetrics().elidedText(
@@ -415,8 +407,8 @@ class WindowSwitcherWidget(BaseWidget):
 
         if not by_mouse:
             btn.setFocus()
-            if self._scroll_area and self._btn_w > 0:
-                bar = self._scroll_area.horizontalScrollBar()
+            bar = self._scroll_area.horizontalScrollBar() if self._scroll_area else None
+            if self._scroll_area and bar is not None and self._btn_w > 0:
                 first_visible = bar.value() // self._btn_w
                 actual_visible_apps = self._scroll_area.width() // self._btn_w
 

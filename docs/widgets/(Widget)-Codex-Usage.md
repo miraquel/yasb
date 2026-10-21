@@ -23,7 +23,7 @@ The widget reuses the login managed by Codex itself. No additional login is need
 where the CLI already works. API-key-only authentication may not expose ChatGPT subscription
 rate limits.
 
-![Codex Usage widget in the YASB bar](../assets/5c5e8e22-f3da-4de7-b811-dbf41e87f5ba.png)
+![Codex Usage widget in the YASB bar](assets/5c5e8e22-f3da-4de7-b811-dbf41e87f5ba.png)
 
 ## Quick start
 
@@ -149,15 +149,36 @@ codex_usage:
 | `sessions` | dictionary | `{'enabled': false, ...}` | Live Codex sessions. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
 | `hearts` | dictionary | `{'enabled': false, 'scale': 1.35}` | Pixel hearts in the popup header. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
 | `footer` | dictionary | `{'enabled': false, ...}` | Plan, account and freshness line closing the popup. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
-| `progress_bar` | dictionary | See example | Native bar indicator showing the active window's remaining percentage. |
-| `callbacks` | dictionary | See example | Mouse actions. |
-| `menu` | dictionary | See example | Popup position, appearance, section visibility, and Fluent navigation icons. `icon` takes a path to an image drawn at 22x22 at the left of the popup header, beside the title and account line; any format Qt can read works, and an empty value leaves the header unmarked. |
+| `progress_bar` | dictionary | [See below](#example-configuration) | Native bar indicator showing the active window's remaining percentage. |
+| `keybindings` | list | `[]` | Optional hotkeys. See [Keybindings](./Keybindings). |
+| `callbacks` | dictionary | [See below](#callbacks) | Mouse actions. |
+| `menu` | dictionary | [See below](#example-configuration) | Popup position, appearance, section visibility, and Fluent navigation icons. `icon` takes a path to an image drawn at 22x22 at the left of the popup header, beside the title and account line; any format Qt can read works, and an empty value leaves the header unmarked. |
 
 The progress bar supports `circular`, `linear_horizontal`, and `linear_vertical`. `color` may be
 a single color or a list of gradient colors. Right-click toggles the active label/window, and
 the progress bar follows it. Set `progress_bar.level_colors` (`low`, `medium`, `high`, as on the
 Claude widget) to recolour the ring by `warn_percent` / `crit_percent` instead: `low` while under
 warn, `medium` from warn, `high` from crit, always from the share used.
+
+## Callbacks
+
+The `callbacks` option maps mouse buttons (`on_left`, `on_middle`, `on_right`) to actions. All keys are optional, the values shown are the defaults.
+
+```yaml
+callbacks:
+  on_left: "toggle_menu"
+  on_middle: "refresh"
+  on_right: "toggle_label"
+```
+
+Available actions:
+
+- `toggle_label` - Switch between `label` and `label_alt`.
+- `toggle_menu` - Open or close the details popup.
+- `toggle_usage_mode` - Flip `{*_value}` and the progress bar between remaining and consumed.
+- `refresh` - Refresh the usage now, without opening the popup.
+- `do_nothing` - Do nothing.
+- `exec <command>` - Run a command, for example `exec cmd.exe /c start ms-settings:network`.
 
 ## Details Popup
 
@@ -194,7 +215,7 @@ totals, Models, and Activity without affecting rate limits or the optional accou
 Left-click again to close it. The middle-click `refresh` callback also refreshes without opening
 the window. Accounts without a secondary limit simply omit that section.
 
-![Codex Usage details popup](../assets/8edf52ee-eec2-4e8f-9fec-3b84accb5f81.png)
+![Codex Usage details popup](assets/8edf52ee-eec2-4e8f-9fec-3b84accb5f81.png)
 
 ## Refresh Feedback
 

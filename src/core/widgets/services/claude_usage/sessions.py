@@ -21,23 +21,13 @@ from typing import Any, ClassVar
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+from core.utils.win32.bindings.kernel32 import GetLastError, kernel32
+from core.utils.win32.constants import ACCESS_DENIED, PROCESS_QUERY_LIMITED_INFORMATION, STILL_ACTIVE
+
 logger = logging.getLogger("claude_usage")
 
-_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-_STILL_ACTIVE = 259
-_ERROR_ACCESS_DENIED = 5
 # procStart and the live start time can disagree by rounding; the original allows 5 s.
 _START_DRIFT = 5 * 10_000_000
-
-_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-_kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-_kernel32.OpenProcess.restype = wintypes.HANDLE
-_kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-_kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-_kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
-_kernel32.GetProcessTimes.restype = wintypes.BOOL
-_kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-_kernel32.CloseHandle.restype = wintypes.BOOL
 
 STATUS_WORKING = "working"
 STATUS_WAITING = "waiting"
@@ -46,22 +36,22 @@ STATUS_IDLE = "idle"
 
 def process_start(pid: int) -> int | None:
     """The live process's start FILETIME; 0 when it is alive but unreadable; None when gone."""
-    handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         # Access denied means the process exists (e.g. an elevated one) - just not its times.
-        return 0 if ctypes.get_last_error() == _ERROR_ACCESS_DENIED else None
+        return 0 if GetLastError() == ACCESS_DENIED else None
     try:
         code = wintypes.DWORD()
-        if _kernel32.GetExitCodeProcess(handle, ctypes.byref(code)) and code.value != _STILL_ACTIVE:
+        if kernel32.GetExitCodeProcess(handle, ctypes.byref(code)) and code.value != STILL_ACTIVE:
             return None
         created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
-        if not _kernel32.GetProcessTimes(
+        if not kernel32.GetProcessTimes(
             handle, ctypes.byref(created), ctypes.byref(exited), ctypes.byref(kernel), ctypes.byref(user)
         ):
             return 0
         return (created.dwHighDateTime << 32) | created.dwLowDateTime
     finally:
-        _kernel32.CloseHandle(handle)
+        kernel32.CloseHandle(handle)
 
 
 def session_dirs(configured: list[str] | None = None) -> list[str]:

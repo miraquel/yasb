@@ -91,7 +91,7 @@ The [Example Style](#example-style) section has rules for every part of the popu
 | `label`           | string  | `'Claude {five_hour}%'` | The format string for the label. Supports the placeholders below. |
 | `label_alt`       | string  | `'Claude {seven_day}%'` | The alternative format string, toggled by the `toggle_label` callback. |
 | `update_interval` | integer | `60` | How often the label and reset countdown are refreshed, in seconds. Must be between 30 and 3600. |
-| `cache_ttl`       | integer | `120` | How long (seconds) a fetched result is cached on disk before the endpoint is queried again. The endpoint is rate-limited, so keep this at a sane value. |
+| `cache_ttl`       | integer | `120` | How long (seconds) a fetched result is cached on disk before the endpoint is queried again (0–3600). The endpoint is rate-limited, so keep this at a sane value. |
 | `five_hour_reset_format` | string | `'relative'` | How the 5-hour window's reset line is phrased in the popup: `relative` (`Resets in 4h 11m`) or `absolute` (`Resets on Sat @ 6:00 AM`). |
 | `seven_day_reset_format` | string | `'absolute'` | How the 7-day window's reset line is phrased in the popup: `relative` or `absolute`. |
 | `reset_show_date` | boolean | `true` | In `absolute` mode, include the month/day (`Resets on Sat, Jun 13 @ 6:00 AM`) so two windows resetting on the same weekday stay distinguishable. |
@@ -112,8 +112,48 @@ The [Example Style](#example-style) section has rules for every part of the popu
 | `sessions`        | dict    | `{'enabled': false, ...}` | Live Claude Code sessions. See [Clawd, sessions, hearts and footer](#clawd-sessions-hearts-and-footer). |
 | `hearts`          | dict    | `{'enabled': false, 'scale': 1.35}` | Pixel hearts in the popup header for what is left of the 5-hour window. |
 | `footer`          | dict    | `{'enabled': false, 'show_plan': true, 'stale_after': 0}` | Closing line with plan, account and data freshness. |
-| `callbacks`       | dict    | `{'on_left': 'toggle_menu', 'on_middle': 'do_nothing', 'on_right': 'toggle_label'}` | Mouse-click callbacks. |
-| `menu`            | dict    | `{'blur': true, 'round_corners': true, 'round_corners_type': 'normal', 'border_color': 'System', 'alignment': 'right', 'direction': 'down', 'offset_top': 6, 'offset_left': 0, 'pin_icon': '', 'unpin_icon': ''}` | Popup menu settings. |
+| `callbacks`       | dict    | [See below](#callbacks) | Mouse-click callbacks. |
+| `menu`            | dict    | [See below](#menu-options) | Popup menu settings. |
+| `keybindings`     | list    | `[]` | Optional hotkeys. See [Keybindings](./Keybindings). |
+
+## Callbacks
+
+The `callbacks` option maps mouse buttons (`on_left`, `on_middle`, `on_right`) to actions. All keys are optional, the values shown are the defaults.
+
+```yaml
+callbacks:
+  on_left: "toggle_menu"
+  on_middle: "do_nothing"
+  on_right: "toggle_label"
+```
+
+Available actions:
+
+- `toggle_label` - Switch between `label` and `label_alt`.
+- `toggle_menu` - Open or close the usage menu.
+- `toggle_usage_mode` - Flip `{*_value}` and the progress bar between consumed and remaining.
+- `refresh` - Fetch the usage again now, bypassing `cache_ttl`.
+- `do_nothing` - Do nothing.
+- `exec <command>` - Run a command, for example `exec cmd.exe /c start ms-settings:network`.
+
+## Menu Options
+
+The `menu` option accepts the following keys. All keys are optional, the values shown are the defaults.
+
+```yaml
+menu:
+  icon: ""
+  blur: true
+  round_corners: true
+  round_corners_type: "normal"
+  border_color: "System"
+  alignment: "right"
+  direction: "down"
+  offset_top: 6
+  offset_left: 0
+  pin_icon: "\ue718"
+  unpin_icon: "\ue77a"
+```
 
 ## Placeholders
 
@@ -188,7 +228,8 @@ claude_usage:
 - **reset_datetime_format:** A strftime template for the exact timestamp line under each window. Note the default pads the month and day (`09/18/2026`); use `%Y-%m-%d %H:%M` for an ISO-style line that matches the `clock` widget.
 - **show_reset_duration:** Whether an absolute reset line also carries its countdown. With the default `relative`/`absolute` pairing this is what makes the 7-day and per-model windows show a duration at all - otherwise only the 5-hour window does.
 - **tooltip:** Whether to show a summary tooltip on hover.
-- **callbacks:** Mouse-click callbacks. Built-in actions: `toggle_menu` (open/close the popup menu), `toggle_label` (swap between `label` and `label_alt`), `toggle_usage_mode` (flip `{*_value}` and the progress bar between consumed and remaining), `refresh` (force an immediate re-fetch, bypassing `cache_ttl`), `do_nothing`, and `exec`.
+- **keybindings:** A list of global hotkeys for this widget. See [Keybindings](./Keybindings).
+- **callbacks:** Mouse event callbacks. See [Callbacks](#callbacks).
 
 > `toggle_label` and `toggle_usage_mode` are independent: the first chooses *which window*
 > (5-hour or 7-day), the second chooses *which way round* the number is read. The popup's
@@ -252,18 +293,19 @@ re-parsed only when its size or mtime changes) and runs off the UI thread.
       default_period: "today"   # session | today | week | month | year
       show_graph: true
       show_graph_grid: false
+      show_models: false
       week_starts_on: "monday"  # monday | sunday
       count_cache_read: true    # false counts only new input/output/cache-creation
       scan_interval: 120        # seconds between transcript scans (30–3600)
 ```
 
-- **enabled:** Turn the Tokens section and `{*_tokens}` placeholders on.
-- **default_period:** Which period is selected when the menu first opens.
-- **show_graph / show_graph_grid:** Show a usage graph for the selected period, with an optional grid.
-- **show_models:** Show a per-model token breakdown in the Tokens section, following the selected period. Top 5 models, computed from local transcripts.
-- **week_starts_on:** First day of the week for the Week total.
-- **count_cache_read:** Whether cache-read tokens count toward the totals. They dominate for heavy users; set `false` for "new work only".
-- **scan_interval:** Seconds between transcript scans (30–3600).
+- **enabled:** (default `false`) Turn the Tokens section and `{*_tokens}` placeholders on.
+- **default_period:** (default `today`) Which period is selected when the menu first opens. One of `session`, `today`, `week`, `month`, `year`.
+- **show_graph / show_graph_grid:** (both default `false`) Show a usage graph for the selected period, with an optional grid.
+- **show_models:** (default `false`) Show a per-model token breakdown in the Tokens section, following the selected period. Top 5 models, computed from local transcripts.
+- **week_starts_on:** (default `monday`) First day of the week for the Week total. One of `monday`, `sunday`.
+- **count_cache_read:** (default `true`) Whether cache-read tokens count toward the totals. They dominate for heavy users; set `false` for "new work only".
+- **scan_interval:** (default `120`) Seconds between transcript scans (30–3600).
 
 > Session is the most recently active session's whole lifetime, so it can span days and may exceed Today.
 
@@ -281,10 +323,10 @@ the bar, and/or an optional status line in the popup header (`show_in_menu`).
       poll_interval: 300  # seconds between status checks (60–3600)
 ```
 
-- **enabled:** Turn the `{status}`/`{status_text}` placeholders and the menu status line on.
-- **show_in_menu:** Show a dot + description line in the popup header.
-- **icon:** The glyph used for the dot. Its colour comes from the `.status.<level>` class.
-- **poll_interval:** Seconds between status checks (60–3600).
+- **enabled:** (default `false`) Turn the `{status}`/`{status_text}` placeholders and the menu status line on.
+- **show_in_menu:** (default `true`) Show a dot + description line in the popup header.
+- **icon:** (default `●`) The glyph used for the dot. Its colour comes from the `.status.<level>` class.
+- **poll_interval:** (default `300`) Seconds between status checks (60–3600).
 
 ## Progress bar
 
@@ -635,8 +677,8 @@ colours to taste.
 .claude-usage-menu .section.tokens .model-rows .progress.model-4 .fill { background-color: #ff9d42; }
 ```
 
-## Example Widget
-<img width="286" height="698" alt="image" src="https://github.com/user-attachments/assets/90166652-9dfa-4959-a185-bf28f18d20ba" />
+## Preview of the Widget
+![Claude Usage YASB Widget](assets/9ab87198-c31d-44a7-b36f-7cb2cf8b0530.png)
 
 ## Troubleshooting
 
