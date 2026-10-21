@@ -6,38 +6,45 @@ lives (and is tested) in the models. Every colour arrives from the stylesheet as
 ``-qproperty-``; the defaults only apply until styles.css says otherwise.
 """
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtProperty
+from collections.abc import Callable, Iterable
+from typing import Any
+
+import PyQt6.QtCore as QtCore
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
 from PyQt6.QtGui import QColor, QImage, QLinearGradient, QPainter, QRadialGradient
-from PyQt6.QtWidgets import QFrame
+from PyQt6.QtWidgets import QFrame, QWidget
 
 from core.utils.tooltip import set_tooltip
 from core.utils.widgets.ai_usage import hearts
 from core.utils.widgets.ai_usage.sky import Colour, Sky, SkyFrame
+
+# pyqtProperty exists at runtime but is missing from the PyQt6 type stubs
+pyqtProperty: Callable[..., Any] = getattr(QtCore, "pyqtProperty")
 
 # The pets' and the sky's animation tick.
 FRAME_MS = 90
 HEART_GAP = 2.5
 
 
-def colour_property(attr: str) -> pyqtProperty:
-    def getter(self) -> QColor:
+def colour_property(attr: str) -> Any:
+    def getter(self: QWidget) -> QColor:
         return getattr(self, attr)
 
-    def setter(self, value: QColor) -> None:
+    def setter(self: QWidget, value: QColor) -> None:
         setattr(self, attr, QColor(value))
         self.update()
 
     return pyqtProperty(QColor, getter, setter)
 
 
-def percent_property(attr: str) -> pyqtProperty:
+def percent_property(attr: str) -> Any:
     # Whole percentages rather than floats: an int -qproperty- is what QSS reliably converts.
-    def getter(self) -> int:
+    def getter(self: SkyScene) -> int:
         return getattr(self, attr)
 
-    def setter(self, value: int) -> None:
+    def setter(self: SkyScene, value: int) -> None:
         setattr(self, attr, max(0, min(100, int(value))))
-        self._render()
+        self._render()  # pyright: ignore[reportPrivateUsage]
         self.update()
 
     return pyqtProperty(int, getter, setter)
@@ -48,7 +55,7 @@ def qcolor(colour: Colour, alpha_scale: float = 1.0) -> QColor:
     return QColor(r, g, b, max(0, min(255, round(a * alpha_scale))))
 
 
-def fill_rects(painter: QPainter, rects, dx: float, dy: float, colour: QColor) -> None:
+def fill_rects(painter: QPainter, rects: Iterable[hearts.Rect], dx: float, dy: float, colour: QColor) -> None:
     for x, y, w, h in rects:
         painter.fillRect(QRectF(dx + x, dy + y, w, h), colour)
 
