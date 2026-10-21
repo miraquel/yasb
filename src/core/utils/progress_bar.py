@@ -151,6 +151,13 @@ class ProgressBar(QFrame):
             painter.setBrush(progress_brush)
             painter.drawRoundedRect(rect, self._radius, self._radius)
 
+    def set_color(self, color: str | list[str]):
+        """Swap the progress colour (or gradient stops) in place, e.g. to follow a threshold."""
+        if color == self._color_config:
+            return
+        self._color_config = color
+        self.update()
+
     def set_value(self, value: float):
         """Set the current value and update the display."""
         new_value = max(0, min(value, 100.0))
@@ -185,3 +192,6 @@ class ProgressWidget(QFrame):
 
     def set_value(self, value: float):
         self._progress_bar.set_value(value)
+
+    def set_color(self, color: str | list[str]):
+        self._progress_bar.set_color(color)

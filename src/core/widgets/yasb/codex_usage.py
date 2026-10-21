@@ -22,14 +22,51 @@ from PyQt6.QtWidgets import (
 
 from core.utils.qobject import is_valid_qobject
 from core.utils.tooltip import set_tooltip
-from core.utils.utilities import PopupWidget, build_progress_widget, refresh_widget_style
+from core.utils.utilities import (
+    PopupWidget,
+    align_label_ink,
+    align_label_text,
+    build_progress_widget,
+    refresh_widget_style,
+)
+from core.utils.widgets.ai_usage.hearts import heart_halves
+from core.utils.widgets.ai_usage.scene import HeartsView, SkyScene
+from core.utils.widgets.ai_usage.sky import apply_sky_settings
+from core.utils.widgets.codex_usage.codex_pet_scene import CodexPetScene
 from core.validation.widgets.yasb.codex_usage import CodexUsageConfig
 from core.widgets.base import BaseWidget
+from core.widgets.services.ai_usage.weather import SkyWeatherService
 from core.widgets.services.codex_usage.codex_api import CodexUsageService, as_dict, as_list
+from core.widgets.services.codex_usage.sessions import (
+    STATUS_IDLE,
+    STATUS_WAITING,
+    STATUS_WORKING,
+    CodexSessionsService,
+    count_sessions,
+    turn_events,
+)
+
+_SESSION_STATES = (STATUS_WORKING, STATUS_WAITING, STATUS_IDLE)
+# The ring's level_colors keys (the Claude widget's names) for this widget's level classes.
+_LEVEL_COLOR_KEYS = {"good": "low", "low": "medium", "critical": "high"}
+
+
+def level_class(used: Any, warn: float, crit: float) -> str:
+    """Traffic light for a window's share used: good under warn, low from warn, critical from crit."""
+    if not isinstance(used, (int, float)):
+        return "unknown"
+    if used >= crit:
+        return "critical"
+    if used >= warn:
+        return "low"
+    return "good"
 
 
 class UsageBar(QFrame):
     """CSS-styleable progress track used by the details popup."""
+
+    # Must match the stylesheet min/max-height for this bar.
+    TRACK_HEIGHT = 6
 
     def __init__(self, value: float, level: str, parent: QFrame | None = None):
         super().__init__(parent)
@@ -44,11 +81,25 @@ class UsageBar(QFrame):
         refresh_widget_style(self, self._fill)
         self._update_fill()
 
+    def _track_height(self) -> int:
+        """Height of the painted track.
+
+        The stylesheet engine paints this frame's background at its styled height and
+        centres it, but sets no Qt geometry - minimumHeight() stays 0 - so the widget keeps
+        whatever height the layout gave it (routinely ~40px). Filling that drew the value as
+        a slab standing proud of the track, so the height is pinned here instead.
+        TRACK_HEIGHT must match the stylesheet's min/max-height for this bar.
+        """
+        return min(self.TRACK_HEIGHT, self.height()) if self.height() > 0 else self.TRACK_HEIGHT
+
     def _update_fill(self) -> None:
+        height = self._track_height()
         fill_width = int(self.width() * self._value / 100)
         if fill_width > 0:
-            fill_width = max(fill_width, self.height())
-        self._fill.setGeometry(0, 0, fill_width, self.height())
+            fill_width = max(fill_width, height)
+        # Centred to match the track behind it; the +1 rounds the half-pixel the same
+        # way the stylesheet engine does, otherwise the fill sits 2px high.
+        self._fill.setGeometry(0, max(0, (self.height() - height + 1) // 2), fill_width, height)
 
     @override
     def resizeEvent(self, a0: QResizeEvent | None) -> None:
@@ -58,6 +109,9 @@ class UsageBar(QFrame):
 
 class TokenBar(QFrame):
     """CSS-styleable horizontal bar for per-model token totals."""
+
+    # Must match the stylesheet min/max-height for this bar.
+    TRACK_HEIGHT = 6
 
     def __init__(self, parent: QFrame | None = None):
         super().__init__(parent)
@@ -70,11 +124,23 @@ class TokenBar(QFrame):
         self._ratio = max(0.0, min(1.0, ratio))
         self._update_fill()
 
+    def _track_height(self) -> int:
+        """Height of the painted track.
+
+        The stylesheet engine paints this frame's background at its styled height and
+        centres it, but sets no Qt geometry - minimumHeight() stays 0 - so the widget keeps
+        whatever height the layout gave it (routinely ~40px). Filling that drew the value as
+        a slab standing proud of the track, so the height is pinned here instead.
+        TRACK_HEIGHT must match the stylesheet's min/max-height for this bar.
+        """
+        return min(self.TRACK_HEIGHT, self.height()) if self.height() > 0 else self.TRACK_HEIGHT
+
     def _update_fill(self) -> None:
+        height = self._track_height()
         width = int(self.width() * self._ratio)
         if width > 0:
-            width = max(width, self.height())
-        self._fill.setGeometry(0, 0, width, self.height())
+            width = max(width, height)
+        self._fill.setGeometry(0, max(0, (self.height() - height + 1) // 2), width, height)
 
     @override
     def resizeEvent(self, a0: QResizeEvent | None) -> None:
@@ -136,27 +202,33 @@ class CodexUsageWidget(BaseWidget):
 
     validation_schema = CodexUsageConfig
 
+    # Floor for the page area, so a sparse page (e.g. Resets with no credits) still reads as a
+    # panel rather than collapsing to a couple of lines.
+    PAGE_MIN_HEIGHT = 120
+
     def __init__(self, config: CodexUsageConfig):
         super().__init__(class_name="codex-usage")
         self.config = config
         self._show_alt_label = False
+        self._usage_mode = self.config.usage_mode
         self._menu: PopupWidget | None = None
         self._section_widgets: dict[str, dict[str, Any]] = {}
         self._detail_widgets: dict[str, QLabel] = {}
+        self._detail_names: dict[str, QLabel] = {}
         self._pages: dict[str, QFrame] = {}
         self._visible_pages: list[str] = []
         self._current_page = "overview"
         self._pager: QFrame | None = None
         self._page_stack: QStackedWidget | None = None
         self._page_navigation: QFrame | None = None
-        self._page_previous: QPushButton | None = None
-        self._page_next: QPushButton | None = None
-        self._page_indicator: QLabel | None = None
+        self._page_tabs: dict[str, QPushButton] = {}
+        self._page_tab_layout: QHBoxLayout | None = None
         self._overview_tokens: QFrame | None = None
         self._overview_empty: QLabel | None = None
         self._token_widgets: dict[str, QLabel] = {}
         self._reset_credit_widgets: list[dict[str, Any]] = []
         self._reset_credits_count: QLabel | None = None
+        self._reset_credits_header: QFrame | None = None
         self._reset_credits_empty: QLabel | None = None
         self._heatmap_cells: list[QFrame] = []
         self._heatmap_month = date.today().replace(day=1)
@@ -165,6 +237,11 @@ class CodexUsageWidget(BaseWidget):
         self._heatmap_next: QPushButton | None = None
         self._heatmap_history_note: QLabel | None = None
         self._model_widgets: list[dict[str, Any]] = []
+        self._plan_label: QLabel | None = None
+        self._hearts: HeartsView | None = None
+        self._meta_account: QLabel | None = None
+        self._meta_updated: QLabel | None = None
+        self._menu_title_label: QLabel | None = None
         self._refresh_button: RefreshButton | None = None
         self._refresh_status: QLabel | None = None
         self._refresh_pending = False
@@ -179,8 +256,35 @@ class CodexUsageWidget(BaseWidget):
             self.config.cache_ttl,
             self.config.timeout,
             self.config.show_token_usage,
+            self.config.show_account,
         )
         self._data: dict[str, Any] = self._service.latest()
+
+        # Live Codex sessions (optional), from Codex's own files. The pet's moods come from
+        # these, so it polls them even when the list itself is off.
+        self._sessions_service: CodexSessionsService | None = None
+        self._sessions: list[dict[str, Any]] = []
+        # Turns that ended since the pet last looked: "finished" / "failed".
+        self._pending_events: list[str] = []
+        self._session_summary: QLabel | None = None
+        self._session_rows: QFrame | None = None
+        self._session_layout: QGridLayout | None = None
+        if self.config.sessions.enabled or self.config.pet.enabled:
+            self._sessions_service = CodexSessionsService.get_instance(
+                self.config.sessions.poll_interval, self.config.sessions.idle_minutes
+            )
+            self._sessions = self._sessions_service.latest()
+
+        # Weather for the sky (optional): fetched only for configured coordinates, never guessed.
+        sky = self.config.sky
+        self._weather_service: SkyWeatherService | None = None
+        self._weather: dict[str, Any] = {}
+        if sky.enabled and sky.weather and sky.latitude is not None and sky.longitude is not None:
+            self._weather_service = SkyWeatherService.get_instance(sky.latitude, sky.longitude, sky.weather_interval)
+            self._weather = self._weather_service.latest()
+        # Built with the popup; None until it first opens.
+        self._pet: CodexPetScene | None = None
+        self._sky: SkyScene | None = None
 
         self.progress_widget = build_progress_widget(self, self.config.progress_bar.model_dump())
         self._init_container()
@@ -192,11 +296,16 @@ class CodexUsageWidget(BaseWidget):
         self.register_callback("toggle_label", self._toggle_label)
         self.register_callback("toggle_menu", self._toggle_menu)
         self.register_callback("refresh", self._refresh)
+        self.register_callback("toggle_usage_mode", self._toggle_usage_mode)
         self.callback_left = self.config.callbacks.on_left
         self.callback_middle = self.config.callbacks.on_middle
         self.callback_right = self.config.callbacks.on_right
 
         self._service.data_ready.connect(self._on_data)
+        if self._sessions_service is not None:
+            self._sessions_service.data_ready.connect(self._on_sessions_data)
+        if self._weather_service is not None:
+            self._weather_service.data_ready.connect(self._on_weather_data)
         self.destroyed.connect(lambda *_: self._release_service())
         self._update_label()
 
@@ -213,6 +322,16 @@ class CodexUsageWidget(BaseWidget):
             self._service.release()
         except RuntimeError:
             pass
+        if self._sessions_service is not None:
+            try:
+                self._sessions_service.release()
+            except RuntimeError:
+                pass
+        if self._weather_service is not None:
+            try:
+                self._weather_service.release()
+            except RuntimeError:
+                pass
 
     def _refresh(self) -> None:
         if is_valid_qobject(self._menu) and self._menu.isVisible() and is_valid_qobject(self._refresh_button):
@@ -222,12 +341,105 @@ class CodexUsageWidget(BaseWidget):
             self._refresh_button.start_animation()
             self._set_refresh_feedback("Refreshing…", "busy")
         self._service.refresh_now()
+        if self._sessions_service is not None:
+            self._sessions_service.refresh_now()
 
     def _on_data(self, data: dict[str, Any]) -> None:
         self._data = data
         self._update_label()
         self._sync_menu()
+        self._feed_pet()
         self._finish_refresh_feedback(not data.get("stale"))
+
+    def _on_sessions_data(self, sessions: list[dict[str, Any]]) -> None:
+        # Kept short: nothing may consume them for a while (the popup closed, no pet).
+        self._pending_events = (self._pending_events + turn_events(self._sessions, sessions))[-8:]
+        self._sessions = sessions
+        self._update_label()
+        self._feed_pet()
+        self._sync_sessions_section()
+
+    def _feed_pet(self) -> None:
+        """Hand the pet the latest sessions, the main window's share used and the turns that ended."""
+        if self._pet is None:
+            # No popup yet: a reaction to a turn that ended long before it opens would be noise.
+            self._pending_events.clear()
+            return
+        used = self._window("primary").get("used")
+        counts = count_sessions(self._sessions)
+        events, self._pending_events = self._pending_events, []
+        try:
+            self._pet.set_inputs(
+                float(used) if isinstance(used, (int, float)) else None,
+                counts[STATUS_WORKING],
+                counts[STATUS_WAITING],
+                counts["total"],
+                events,
+            )
+        except RuntimeError:
+            self._pet = None
+
+    def _on_weather_data(self, data: dict[str, Any]) -> None:
+        self._weather = data
+        self._feed_sky()
+
+    @staticmethod
+    def _clock_minutes(minutes: float) -> str:
+        m = round(minutes) % 1440
+        return f"{m // 60:02d}:{m % 60:02d}"
+
+    def _feed_sky(self) -> None:
+        """Hand the sky its settings and the latest weather, and word its tooltip."""
+        if self._sky is None:
+            return
+        try:
+            model = self._sky.model
+            apply_sky_settings(model, self.config.sky, self._weather)
+            tip = "\n".join(model.describe(datetime.now().astimezone(), self._clock_minutes))
+            # The pet covers part of the sky, so its tooltip carries it; without it the sky has its own.
+            if self._pet is not None:
+                self._pet.set_tip_extra(tip)
+            else:
+                self._sky.set_tip(tip)
+        except RuntimeError:
+            self._sky = None
+
+    def _session_values(self) -> dict[str, str]:
+        counts = count_sessions(self._sessions)
+        sc = self.config.sessions
+        badge = []
+        if counts[STATUS_WORKING]:
+            badge.append(f"{sc.working_icon}{counts[STATUS_WORKING]}")
+        if counts[STATUS_WAITING]:
+            badge.append(f"{sc.waiting_icon}{counts[STATUS_WAITING]}")
+        return {
+            "sessions_total": str(counts["total"]),
+            "sessions_working": str(counts[STATUS_WORKING]),
+            "sessions_waiting": str(counts[STATUS_WAITING]),
+            "sessions_idle": str(counts[STATUS_IDLE]),
+            # Only what needs attention, so it renders empty (and hides) when all is quiet.
+            "sessions_badge": " ".join(badge),
+        }
+
+    def _session_state(self) -> str:
+        """The most pressing session state, for the label's state class."""
+        counts = count_sessions(self._sessions)
+        if counts[STATUS_WAITING]:
+            return STATUS_WAITING
+        if counts[STATUS_WORKING]:
+            return STATUS_WORKING
+        return STATUS_IDLE
+
+    def _sessions_summary_text(self) -> str:
+        counts = count_sessions(self._sessions)
+        if not counts["total"]:
+            return "None running"
+        parts = [f"{counts['total']} open"]
+        if counts[STATUS_WORKING]:
+            parts.append(f"{counts[STATUS_WORKING]} working")
+        if counts[STATUS_WAITING]:
+            parts.append(f"{counts[STATUS_WAITING]} waiting")
+        return " · ".join(parts)
 
     def _set_refresh_feedback(self, text: str, state: str) -> None:
         if not is_valid_qobject(self._refresh_status):
@@ -308,15 +520,8 @@ class CodexUsageWidget(BaseWidget):
             return f"{seconds // 60}m ago"
         return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
 
-    @staticmethod
-    def _level_class(remaining: Any) -> str:
-        if not isinstance(remaining, (int, float)):
-            return "unknown"
-        if remaining <= 20:
-            return "critical"
-        if remaining <= 50:
-            return "low"
-        return "good"
+    def _level(self, window: dict[str, Any]) -> str:
+        return level_class(window.get("used"), self.config.warn_percent, self.config.crit_percent)
 
     def _format_values(self) -> dict[str, str]:
         primary = self._window("primary")
@@ -330,10 +535,66 @@ class CodexUsageWidget(BaseWidget):
             "secondary_window": self._duration_name(secondary.get("duration_mins"), "secondary"),
             "primary_reset": self._fmt_reset(primary.get("resets_at")),
             "secondary_reset": self._fmt_reset(secondary.get("resets_at")),
+            # Mode-aware pair, flipped by the toggle_usage_mode callback. The explicit
+            # _used/_remaining placeholders above are unaffected.
+            "primary_value": self._mode_value(primary),
+            "secondary_value": self._mode_value(secondary),
+            "mode": (
+                self.config.mode_label_remaining if self._usage_mode == "remaining" else self.config.mode_label_used
+            ),
             "plan": str(self._data.get("plan") or "--"),
             "credits": str(self._data.get("credits") if self._data.get("credits") is not None else "--"),
             "stale": self.config.stale_icon if self._data.get("stale") else "",
+            **self._session_values(),
         }
+
+    def _build_header_icon(self) -> QLabel | None:
+        """The product mark at the left of the header, when a path is configured.
+
+        Rendered as rich text rather than a QPixmap so the same <img> the bar label accepts
+        works here, and a missing file degrades to an empty label instead of raising.
+        """
+        path = (self.config.menu.icon or "").strip()
+        if not path:
+            return None
+        label = QLabel(f"<img src='{path}' width='22' height='22'>")
+        label.setProperty("class", "app-icon")
+        return label
+
+    def _account_line(self) -> str:
+        """Who these numbers belong to: the signed-in email.
+
+        Comes from the app-server's account/read, so the widget still never opens
+        ~/.codex/auth.json. Falls back to the plan when an older CLI has no account method,
+        and to nothing at all when signed out - the caller then omits the line.
+        """
+        if not self.config.show_account:
+            return ""
+        email = str(self._data.get("email") or "").strip()
+        if email:
+            return email
+        plan = str(self._data.get("plan") or "").strip()
+        return f"{plan.lower()} plan" if plan else ""
+
+    def _account_tooltip(self) -> str:
+        """Email and plan together, where the header line has room for only one."""
+        parts = []
+        email = str(self._data.get("email") or "").strip()
+        plan = str(self._data.get("plan") or "").strip()
+        if email:
+            parts.append(email)
+        if plan:
+            parts.append(f"{plan.lower()} plan")
+        return "\n".join(parts)
+
+    def _mode_value(self, window: dict[str, Any]) -> str:
+        key = "used" if self._usage_mode == "used" else "remaining"
+        return self._percent(window.get(key))
+
+    def _toggle_usage_mode(self) -> None:
+        """Flip the bar between 'still available' and 'consumed so far'."""
+        self._usage_mode = "used" if self._usage_mode == "remaining" else "remaining"
+        self._update_label()
 
     def _active_window(self) -> dict[str, Any]:
         name = "secondary" if self._show_alt_label else "primary"
@@ -364,29 +625,46 @@ class CodexUsageWidget(BaseWidget):
                 rendered = text
             widget.setText(rendered)
             widget.setVisible(bool(rendered))
+            if "{sessions_" in part:
+                # .working / .waiting on the badge's own label, so waiting can stand out.
+                base = widget.property("class") or "sessions"
+                base = " ".join(t for t in base.split() if t not in _SESSION_STATES)
+                widget.setProperty("class", f"{base} {self._session_state()}")
 
         active_window = self._active_window()
         if self.progress_widget:
             self.progress_widget.setVisible(bool(active_window))
             if active_window:
-                self.progress_widget.set_value(self._percent_value(active_window.get("remaining")))
+                # Follow usage_mode so the ring never contradicts the number beside it.
+                key = "used" if self._usage_mode == "used" else "remaining"
+                self.progress_widget.set_value(self._percent_value(active_window.get(key)))
+                level_colors = self.config.progress_bar.level_colors
+                level = self._level(active_window)
+                if level_colors is not None and level in _LEVEL_COLOR_KEYS:
+                    # From the share used whichever way the ring runs, so red always means close.
+                    self.progress_widget.set_color(getattr(level_colors, _LEVEL_COLOR_KEYS[level]))
 
         if self.config.tooltip:
             primary = self._window("primary")
             secondary = self._window("secondary")
-            lines = [
-                f"Codex {self._duration_name(primary.get('duration_mins'), 'primary')}: "
-                f"{self._percent(primary.get('remaining'))}% remaining "
-                f"({self._percent(primary.get('used'))}% used)",
-            ]
+            mode_key = "used" if self._usage_mode == "used" else "remaining"
+            mode_word = self.config.mode_label_used if self._usage_mode == "used" else self.config.mode_label_remaining
+
+            def window_line(window: dict[str, Any], fallback: str) -> str:
+                name = self._duration_name(window.get("duration_mins"), fallback)
+                return f"Codex {name}: {self._percent(window.get(mode_key))}% {mode_word}"
+
+            lines = [window_line(primary, "primary")]
             if secondary:
-                lines.append(
-                    f"Codex {self._duration_name(secondary.get('duration_mins'), 'secondary')}: "
-                    f"{self._percent(secondary.get('remaining'))}% remaining "
-                    f"({self._percent(secondary.get('used'))}% used)"
-                )
+                lines.append(window_line(secondary, "secondary"))
+            if self._sessions_service is not None:
+                lines.append(f"Sessions: {self._sessions_summary_text().lower()}")
+            account = self._account_line()
+            if account:
+                lines.append(account)
             if self._data.get("stale"):
-                lines.append(f"Cached data: {self._data.get('error') or 'refresh pending'}")
+                reason = str(self._data.get("error") or "").strip()
+                lines.append(f"Cached - {reason}" if reason else "Cached")
             set_tooltip(self, "\n".join(lines))
         refresh_widget_style(*active_widgets)
 
@@ -399,6 +677,10 @@ class CodexUsageWidget(BaseWidget):
     def _show_menu(self) -> None:
         menu = self._menu if is_valid_qobject(self._menu) else self._build_menu()
         self._sync_menu()
+        self._sync_sessions_section()
+        # Before show(): the pet's first frame comes from these inputs.
+        self._feed_pet()
+        self._feed_sky()
         menu.adjustSize()
         menu.setPosition(
             alignment=self.config.menu.alignment,
@@ -409,55 +691,142 @@ class CodexUsageWidget(BaseWidget):
         menu.show()
         self._service.refresh_now()
 
+    @staticmethod
+    def _window_phrase(minutes: Any) -> str:
+        """A readable name for a rate-limit window, e.g. "1-week", "5-hour".
+
+        The short forms ("1w", "5h") suit the bar label, but the popup caption is a sentence
+        and reads badly with abbreviations in the middle of it.
+        """
+        if not isinstance(minutes, (int, float)) or minutes <= 0:
+            return "current"
+        minutes = int(minutes)
+        if minutes % 10080 == 0:
+            weeks = minutes // 10080
+            return f"{weeks}-week"
+        if minutes % 1440 == 0:
+            return f"{minutes // 1440}-day"
+        if minutes % 60 == 0:
+            return f"{minutes // 60}-hour"
+        return f"{minutes}-minute"
+
     def _build_section(self, name: str, fallback_title: str) -> QFrame:
+        """The primary window leads; a secondary window, when an account has one, trails.
+
+        The reading used to state the same fact twice - "4% used" beside "96% remaining" at
+        equal weight - so neither was the answer. usage_mode now decides which way round the
+        single number reads, and the caption says which, so the second number is redundant.
+        """
+        if name == "primary":
+            return self._build_window_hero(name)
+        return self._build_window_row(name, fallback_title)
+
+    def _build_window_hero(self, name: str) -> QFrame:
         section = QFrame()
-        section.setProperty("class", f"section {name}")
+        section.setProperty("class", f"section {name} hero")
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        title = QLabel(fallback_title)
-        title.setProperty("class", "title")
-        layout.addWidget(title)
+        value = QLabel("--%")
+        value.setProperty("class", "hero-value unknown")
+
+        # A sentence rather than a chip: it has to carry both which window this is and which
+        # way the number reads, and a chip repeating the window name would say half of that.
+        caption = QLabel("")
+        caption.setProperty("class", "hero-caption")
+
+        if self.config.pet.enabled or self.config.sky.enabled:
+            # The pet lives beside the reading, on the same ground line as its caption, as Clawd
+            # does in the Claude popup, and the sky spans the two of them from behind.
+            if self.config.sky.enabled:
+                self._sky = SkyScene(self.config.pet.scale)
+                top = self._sky
+            else:
+                top = QFrame()
+                top.setProperty("class", "hero-top")
+            top_layout = QHBoxLayout(top)
+            top_layout.setContentsMargins(0, 0, 0, 0)
+            top_layout.setSpacing(0)
+            reading = QFrame()
+            reading.setProperty("class", "hero-reading")
+            reading_layout = QVBoxLayout(reading)
+            reading_layout.setContentsMargins(0, 0, 0, 0)
+            reading_layout.setSpacing(0)
+            reading_layout.addWidget(value, 0, Qt.AlignmentFlag.AlignLeft)
+            reading_layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
+            top_layout.addWidget(reading, 0, Qt.AlignmentFlag.AlignBottom)
+            if self.config.pet.enabled:
+                self._pet = CodexPetScene(self.config.pet.scale)
+                top_layout.addWidget(self._pet, 1, Qt.AlignmentFlag.AlignBottom)
+            else:
+                top_layout.addStretch(1)
+            layout.addWidget(top)
+        else:
+            layout.addWidget(value, 0, Qt.AlignmentFlag.AlignLeft)
+            layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignLeft)
 
         progress = UsageBar(0, "unknown")
         layout.addWidget(progress)
-
-        stats = QFrame()
-        stats.setProperty("class", "stats")
-        stats_layout = QHBoxLayout(stats)
-        stats_layout.setContentsMargins(0, 0, 0, 0)
-        stats_layout.setSpacing(0)
-        used = QLabel("--% used")
-        used.setProperty("class", "used")
-        stats_layout.addWidget(used)
-        stats_layout.addStretch()
-        remaining = QLabel("--% remaining")
-        remaining.setProperty("class", "remaining unknown")
-        stats_layout.addWidget(remaining)
-        layout.addWidget(stats)
 
         timing = QFrame()
         timing.setProperty("class", "timing")
         timing_layout = QHBoxLayout(timing)
         timing_layout.setContentsMargins(0, 0, 0, 0)
         timing_layout.setSpacing(8)
-        reset = QLabel("Reset unknown")
+        reset = QLabel("Reset time unknown")
         reset.setProperty("class", "reset")
         timing_layout.addWidget(reset)
         timing_layout.addStretch()
         date = QLabel("--")
         date.setProperty("class", "date")
+        date.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         timing_layout.addWidget(date)
         layout.addWidget(timing)
+
         self._section_widgets[name] = {
+            "variant": "hero",
+            "frame": section,
+            "value": value,
+            "caption": caption,
+            "progress": progress,
+            "reset": reset,
+            "date": date,
+        }
+        return section
+
+    def _build_window_row(self, name: str, fallback_title: str) -> QFrame:
+        """Compact single line, matching the Claude popup's secondary windows."""
+        section = QFrame()
+        section.setProperty("class", f"section {name} ledger")
+        layout = QHBoxLayout(section)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        title = QLabel(fallback_title)
+        title.setProperty("class", "name")
+        layout.addWidget(title)
+
+        progress = UsageBar(0, "unknown")
+        layout.addWidget(progress, 1)
+
+        percent = QLabel("--%")
+        percent.setProperty("class", "percent unknown")
+        percent.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(percent)
+
+        countdown = QLabel("--")
+        countdown.setProperty("class", "countdown")
+        countdown.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(countdown)
+
+        self._section_widgets[name] = {
+            "variant": "ledger",
             "frame": section,
             "title": title,
             "progress": progress,
-            "reset": reset,
-            "used": used,
-            "remaining": remaining,
-            "date": date,
+            "percent": percent,
+            "countdown": countdown,
         }
         return section
 
@@ -499,17 +868,15 @@ class CodexUsageWidget(BaseWidget):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(8)
-        title = QLabel("Usage limit resets")
-        title.setProperty("class", "section-title")
-        header_layout.addWidget(title)
-        header_layout.addStretch()
         count = QLabel("")
         count.setProperty("class", "reset-credits-count")
         header_layout.addWidget(count)
+        header_layout.addStretch()
         self._reset_credits_count = count
+        self._reset_credits_header = header
         layout.addWidget(header)
 
-        empty = QLabel("No reset credits available")
+        empty = QLabel("No reset credits on this account")
         empty.setProperty("class", "empty-state reset-credits-empty")
         empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty.setVisible(False)
@@ -543,9 +910,21 @@ class CodexUsageWidget(BaseWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        title = QLabel("Models · 30 days")
+        # Name and scope split apart: the heading says what this is, the caption says how far
+        # back it reaches. Joining them with a middle dot made the window read as part of the name.
+        heading = QFrame()
+        heading.setProperty("class", "models-heading")
+        heading_layout = QHBoxLayout(heading)
+        heading_layout.setContentsMargins(0, 0, 0, 0)
+        heading_layout.setSpacing(0)
+        title = QLabel("Models")
         title.setProperty("class", "section-title")
-        layout.addWidget(title)
+        heading_layout.addWidget(title, 0, Qt.AlignmentFlag.AlignLeft)
+        heading_layout.addStretch()
+        scope = QLabel("Last 30 days")
+        scope.setProperty("class", "section-scope")
+        heading_layout.addWidget(scope)
+        layout.addWidget(heading)
 
         for index in range(5):
             row = QFrame()
@@ -582,10 +961,6 @@ class CodexUsageWidget(BaseWidget):
             tokens_layout = QVBoxLayout(tokens)
             tokens_layout.setContentsMargins(0, 0, 0, 0)
             tokens_layout.setSpacing(0)
-            title = QLabel("Token totals")
-            title.setProperty("class", "section-title")
-            tokens_layout.addWidget(title)
-
             periods = QFrame()
             periods.setProperty("class", "periods")
             periods_layout = QGridLayout(periods)
@@ -593,7 +968,7 @@ class CodexUsageWidget(BaseWidget):
             periods_layout.setHorizontalSpacing(8)
             periods_layout.setVerticalSpacing(2)
             for column, (label, key) in enumerate(
-                (("TODAY", "today"), ("7 DAYS", "week"), ("30 DAYS", "month"), ("YEAR", "year"))
+                (("Today", "today"), ("7 days", "week"), ("30 days", "month"), ("Year", "year"))
             ):
                 name = QLabel(label)
                 name.setProperty("class", "period-name")
@@ -608,7 +983,7 @@ class CodexUsageWidget(BaseWidget):
             self._overview_tokens = tokens
             layout.addWidget(tokens)
 
-            empty = QLabel("Token history is unavailable")
+            empty = QLabel("No Codex sessions found on this machine")
             empty.setProperty("class", "empty-state")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty.setVisible(False)
@@ -711,7 +1086,7 @@ class CodexUsageWidget(BaseWidget):
             history_start = date.today()
         self._heatmap_month = min(current_month, max(earliest_navigation_month, self._heatmap_month))
         if is_valid_qobject(self._heatmap_month_label):
-            self._heatmap_month_label.setText(self._heatmap_month.strftime("%B %Y").upper())
+            self._heatmap_month_label.setText(self._heatmap_month.strftime("%B %Y"))
         if is_valid_qobject(self._heatmap_previous):
             self._heatmap_previous.setEnabled(self._heatmap_month > earliest_navigation_month)
         if is_valid_qobject(self._heatmap_next):
@@ -763,7 +1138,6 @@ class CodexUsageWidget(BaseWidget):
         layout.setVerticalSpacing(4)
 
         rows = (
-            ("Plan", "plan"),
             ("Credits", "credits"),
             ("Updated", "updated"),
             ("Status", "status"),
@@ -776,6 +1150,7 @@ class CodexUsageWidget(BaseWidget):
             value.setProperty("class", f"value {key}")
             layout.addWidget(value, row, 1)
             self._detail_widgets[key] = value
+            self._detail_names[key] = name
 
         error = QLabel("")
         error.setProperty("class", "error")
@@ -791,40 +1166,25 @@ class CodexUsageWidget(BaseWidget):
         pager_layout.setContentsMargins(0, 0, 0, 0)
         pager_layout.setSpacing(0)
 
+        # A tab per page rather than prev/next arrows. The arrows made the most useful pages
+        # (Models, Activity) invisible until you went hunting, and forced a "3 / 4" counter
+        # to exist purely to say where you were. Naming every destination removes both.
         navigation = QFrame()
-        navigation.setProperty("class", "page-nav")
+        navigation.setProperty("class", "page-tabs")
         self._page_navigation = navigation
         navigation_layout = QHBoxLayout(navigation)
         navigation_layout.setContentsMargins(0, 0, 0, 0)
-        navigation_layout.setSpacing(0)
-
-        previous = QPushButton(self.config.menu.previous_page_icon)
-        previous.setProperty("class", "page-button previous")
-        previous.setAccessibleName("Previous Codex usage page")
-        set_tooltip(previous, "Previous page")
-        previous.clicked.connect(lambda: self._change_page(-1))
-        navigation_layout.addWidget(previous)
-        self._page_previous = previous
-
-        indicator = QLabel("")
-        indicator.setProperty("class", "page-indicator")
-        indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        navigation_layout.addWidget(indicator, 1)
-        self._page_indicator = indicator
-
-        next_button = QPushButton(self.config.menu.next_page_icon)
-        next_button.setProperty("class", "page-button next")
-        next_button.setAccessibleName("Next Codex usage page")
-        set_tooltip(next_button, "Next page")
-        next_button.clicked.connect(lambda: self._change_page(1))
-        navigation_layout.addWidget(next_button)
-        self._page_next = next_button
+        navigation_layout.setSpacing(6)
+        navigation_layout.addStretch()
+        self._page_tab_layout = navigation_layout
         pager_layout.addWidget(navigation)
 
         stack = QStackedWidget()
         stack.setProperty("class", "page-stack")
-        # Fits the activity grid while keeping every page stable across Windows display scales.
-        stack.setFixedHeight(220)
+        # Height follows the page actually on screen (see _fit_page_height). A constant here
+        # would give every page the tallest page's height, leaving the short Overview page
+        # with a large dead area underneath it.
+        stack.setFixedHeight(self.PAGE_MIN_HEIGHT)
         self._page_stack = stack
         if self.config.menu.show_overview or self.config.menu.show_details:
             stack.addWidget(self._build_overview_page())
@@ -839,23 +1199,32 @@ class CodexUsageWidget(BaseWidget):
         self._pager = pager
         return pager
 
-    def _change_page(self, amount: int) -> None:
-        if self._current_page not in self._visible_pages:
+    def _fit_page_height(self) -> None:
+        """Shrink the page area to the page currently shown, then refit the popup.
+
+        A QStackedWidget reports the tallest child as its size hint, so without this the
+        Overview page inherits the Activity grid's height and trails a block of empty space.
+        Width stays locked, so only the height moves.
+        """
+        page = self._pages.get(self._current_page)
+        if page is None or not is_valid_qobject(self._page_stack):
             return
-        index = self._visible_pages.index(self._current_page) + amount
-        if 0 <= index < len(self._visible_pages):
-            self._current_page = self._visible_pages[index]
-            self._sync_pager()
+        try:
+            page.adjustSize()
+            height = max(page.sizeHint().height(), self.PAGE_MIN_HEIGHT)
+            if height == self._page_stack.height():
+                return
+            self._page_stack.setFixedHeight(height)
+            if is_valid_qobject(self._menu) and self._menu.isVisible():
+                # activate() forces the pending layout pass now; Qt invalidates the cached
+                # size hint lazily, so without it the popup would resize one page behind.
+                self._menu.layout().activate()
+                self._menu.resize(self._menu.width(), self._menu.sizeHint().height())
+        except RuntimeError:
+            self._page_stack = None
 
     def _sync_pager(self) -> None:
-        if (
-            not is_valid_qobject(self._pager)
-            or not is_valid_qobject(self._page_stack)
-            or self._page_navigation is None
-            or self._page_previous is None
-            or self._page_next is None
-            or self._page_indicator is None
-        ):
+        if not is_valid_qobject(self._pager) or not is_valid_qobject(self._page_stack) or self._page_navigation is None:
             return
         tokens = as_dict(self._data.get("tokens")) if self.config.show_token_usage else None
         has_tokens = tokens is not None
@@ -884,21 +1253,49 @@ class CodexUsageWidget(BaseWidget):
             return
         if self._current_page not in visible_pages:
             self._current_page = "overview" if "overview" in visible_pages else visible_pages[0]
-        index = visible_pages.index(self._current_page)
         self._page_stack.setCurrentWidget(self._pages[self._current_page])
+        self._fit_page_height()
 
         show_navigation = len(visible_pages) > 1
         self._page_navigation.setVisible(show_navigation)
         if not show_navigation:
             return
+        self._sync_page_tabs(visible_pages)
+
+    def _sync_page_tabs(self, visible_pages: list[str]) -> None:
+        """Keep one tab per available page, with the current one marked active.
+
+        Tabs are only rebuilt when the set of pages changes - a page appears or disappears
+        with the data - so a routine refresh just re-marks the active one and never flickers.
+        """
         overview_title = "Overview" if self.config.menu.show_overview else "Details"
         titles = {"overview": overview_title, "resets": "Resets", "models": "Models", "activity": "Activity"}
-        self._page_previous.setEnabled(index > 0)
-        self._page_next.setEnabled(index < len(visible_pages) - 1)
-        self._page_indicator.setText(f"{titles[self._current_page]}  ·  {index + 1} / {len(visible_pages)}")
-        self._page_indicator.setAccessibleName(
-            f"{titles[self._current_page]} page, {index + 1} of {len(visible_pages)}"
-        )
+
+        if list(self._page_tabs) != visible_pages:
+            for button in self._page_tabs.values():
+                self._page_tab_layout.removeWidget(button)
+                button.setParent(None)
+                button.deleteLater()
+            self._page_tabs = {}
+            for position, name in enumerate(visible_pages):
+                button = QPushButton(titles[name])
+                button.setProperty("class", "page-tab")
+                button.setAccessibleName(f"{titles[name]} page")
+                button.clicked.connect(lambda _=False, page=name: self._select_page(page))
+                # Insert before the trailing stretch so the strip stays left-aligned.
+                self._page_tab_layout.insertWidget(position, button)
+                self._page_tabs[name] = button
+
+        for name, button in self._page_tabs.items():
+            active = name == self._current_page
+            button.setProperty("class", "page-tab active" if active else "page-tab")
+            refresh_widget_style(button)
+
+    def _select_page(self, page: str) -> None:
+        if page == self._current_page or page not in self._pages:
+            return
+        self._current_page = page
+        self._sync_pager()
 
     def _build_menu(self) -> PopupWidget:
         menu = PopupWidget(
@@ -919,10 +1316,28 @@ class CodexUsageWidget(BaseWidget):
         header.setProperty("class", "header")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
+        app_icon = self._build_header_icon()
+        if app_icon is not None:
+            header_layout.addWidget(app_icon, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        title_stack = QFrame()
+        title_stack.setProperty("class", "title-stack")
+        title_stack_layout = QVBoxLayout(title_stack)
+        title_stack_layout.setContentsMargins(0, 0, 0, 0)
+        title_stack_layout.setSpacing(0)
         title = QLabel("Codex Usage")
         title.setProperty("class", "text")
-        header_layout.addWidget(title)
+        title_stack_layout.addWidget(title, 0, Qt.AlignmentFlag.AlignLeft)
+        plan_label = QLabel("")
+        plan_label.setProperty("class", "plan-line")
+        title_stack_layout.addWidget(plan_label, 0, Qt.AlignmentFlag.AlignLeft)
+        self._plan_label = plan_label
+        self._menu_title_label = title
+        header_layout.addWidget(title_stack)
         header_layout.addStretch()
+        if self.config.hearts.enabled:
+            self._hearts = HeartsView(self.config.hearts.scale)
+            header_layout.addWidget(self._hearts, 0, Qt.AlignmentFlag.AlignVCenter)
         refresh_status = QLabel("")
         refresh_status.setProperty("class", "refresh-status")
         refresh_status.setVisible(False)
@@ -940,8 +1355,113 @@ class CodexUsageWidget(BaseWidget):
         layout.addWidget(header)
         layout.addWidget(self._build_section("primary", "Primary"))
         layout.addWidget(self._build_section("secondary", "Secondary"))
+        if self.config.sessions.enabled and self.config.sessions.show_in_menu:
+            layout.addWidget(self._build_sessions_section())
         layout.addWidget(self._build_pager())
+        if self.config.footer.enabled:
+            layout.addWidget(self._build_meta_line())
+
+        # Before the first measure: the indent it removes is part of each label's width.
+        align_label_text(menu)
         return menu
+
+    def _build_sessions_section(self) -> QFrame:
+        """Sessions section: what Codex is doing right now, one row per open chat.
+
+        The same structure and classes as the Claude popup's, so one set of rules styles both.
+        """
+        frame = QFrame()
+        frame.setProperty("class", "section sessions")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        title_row = QFrame()
+        title_row.setProperty("class", "title-row")
+        title_layout = QHBoxLayout(title_row)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(0)
+        title_label = QLabel("Sessions")
+        title_label.setProperty("class", "title")
+        title_layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        title_layout.addStretch()
+        self._session_summary = QLabel("")
+        self._session_summary.setProperty("class", "summary")
+        self._session_summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        title_layout.addWidget(self._session_summary)
+        layout.addWidget(title_row)
+
+        self._session_rows = QFrame()
+        self._session_rows.setProperty("class", "session-rows")
+        self._session_layout = QGridLayout(self._session_rows)
+        self._session_layout.setContentsMargins(0, 0, 0, 0)
+        self._session_layout.setHorizontalSpacing(8)
+        self._session_layout.setVerticalSpacing(4)
+        self._session_layout.setColumnStretch(1, 1)
+        layout.addWidget(self._session_rows)
+        return frame
+
+    @staticmethod
+    def _clip(text: str, limit: int) -> str:
+        return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+    @staticmethod
+    def _session_detail(session: dict[str, Any]) -> str:
+        if session["status"] == STATUS_WORKING:
+            detail = "working"
+        elif session["status"] == STATUS_WAITING:
+            detail = f"needs you · {session['tool']}" if session["tool"] else "needs you"
+        else:
+            detail = "idle"
+        return f"{detail} · {session['app']}" if session["app"] else detail
+
+    def _sync_sessions_section(self) -> None:
+        """Rebuild the session rows and refit the popup's height to them."""
+        if self._session_layout is None:
+            return
+        sc = self.config.sessions
+        icons = {STATUS_WORKING: sc.working_icon, STATUS_WAITING: sc.waiting_icon, STATUS_IDLE: sc.idle_icon}
+        try:
+            self._session_summary.setText(self._sessions_summary_text())
+            while self._session_layout.count():
+                item = self._session_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    # Detached now (not just deleteLater) so the size hint below is current.
+                    widget.setParent(None)
+                    widget.deleteLater()
+            # Waiting first: those are the rows that want something from you.
+            order = {STATUS_WAITING: 0, STATUS_WORKING: 1, STATUS_IDLE: 2}
+            sessions = sorted(self._sessions, key=lambda s: order[s["status"]])
+            shown = sessions[: sc.max_rows]
+            for row, session in enumerate(shown):
+                marker = QLabel(icons[session["status"]])
+                marker.setProperty("class", f"marker {session['status']}")
+                name = QLabel(self._clip(session["name"], 30))
+                name.setProperty("class", "name")
+                detail = QLabel(self._clip(self._session_detail(session), 28))
+                detail.setProperty("class", f"detail {session['status']}")
+                detail.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                folder = session["cwd"] or session["name"]
+                for widget in (marker, name, detail):
+                    set_tooltip(widget, f"{session['name']}\n{folder}")
+                self._session_layout.addWidget(marker, row, 0)
+                self._session_layout.addWidget(name, row, 1)
+                self._session_layout.addWidget(detail, row, 2)
+            if len(sessions) > len(shown) and sc.max_rows:
+                more = QLabel(f"+{len(sessions) - len(shown)} more")
+                more.setProperty("class", "more")
+                self._session_layout.addWidget(more, len(shown), 1, 1, 2)
+            self._session_rows.setVisible(bool(shown))
+            align_label_text(self._session_rows)
+            if is_valid_qobject(self._menu) and self._menu.isVisible():
+                # Recompute now, then resize the height only, as _fit_page_height does.
+                self._menu.layout().activate()
+                self._menu.resize(self._menu.width(), self._menu.sizeHint().height())
+        except RuntimeError:
+            self._session_summary = None
+            self._session_rows = None
+            self._session_layout = None
 
     def _sync_reset_credits(self) -> None:
         if not is_valid_qobject(self._reset_credits_count):
@@ -953,6 +1473,9 @@ class CodexUsageWidget(BaseWidget):
         available_count = max(0, int(available_count)) if isinstance(available_count, (int, float)) else 0
         suffix = "credit" if available_count == 1 else "credits"
         self._reset_credits_count.setText(f"{available_count} {suffix}")
+        if is_valid_qobject(self._reset_credits_header):
+            # "0 credits" above "No reset credits on this account" states one fact twice.
+            self._reset_credits_header.setVisible(bool(available_count))
 
         credits = summary.get("credits")
         credit_items = [item for raw in as_list(credits) or [] if (item := as_dict(raw)) is not None]
@@ -960,7 +1483,7 @@ class CodexUsageWidget(BaseWidget):
             if credits is None and available_count:
                 message = f"{available_count} reset {suffix} available; details unavailable"
             else:
-                message = "No reset credits available"
+                message = "No reset credits on this account"
             self._reset_credits_empty.setText(message)
             self._reset_credits_empty.setVisible(not credit_items)
 
@@ -994,16 +1517,34 @@ class CodexUsageWidget(BaseWidget):
             if not window:
                 continue
             remaining = window.get("remaining")
-            level = self._level_class(remaining)
-            duration = self._duration_name(window.get("duration_mins"), fallback)
-            widgets["title"].setText(duration)
-            widgets["progress"].set_value(self._percent_value(remaining), level)
-            widgets["used"].setText(f"{self._percent(window.get('used'))}% used")
-            widgets["remaining"].setText(f"{self._percent(remaining)}% remaining")
-            widgets["remaining"].setProperty("class", f"remaining {level}")
+            level = self._level(window)
+            # The fill follows usage_mode so it can never contradict the number beside it:
+            # showing "4% used" against a nearly-full bar reads as two different facts.
+            # The colour still tracks health (how much is left), not the number's magnitude.
+            filled = window.get("used") if self._usage_mode == "used" else remaining
+            widgets["progress"].set_value(self._percent_value(filled), level)
+
+            if widgets.get("variant") == "ledger":
+                widgets["title"].setText(self._duration_name(window.get("duration_mins"), fallback))
+                widgets["percent"].setText(f"{self._mode_value(window)}%")
+                widgets["percent"].setProperty("class", f"percent {level}")
+                widgets["countdown"].setText(self._fmt_reset(window.get("resets_at")))
+                refresh_widget_style(widgets["percent"])
+                continue
+
+            widgets["value"].setText(f"{self._mode_value(window)}%")
+            widgets["value"].setProperty("class", f"hero-value {level}")
+            phrase = self._window_phrase(window.get("duration_mins"))
+            mode_word = (
+                self.config.mode_label_remaining if self._usage_mode == "remaining" else self.config.mode_label_used
+            )
+            widgets["caption"].setText(f"of your {phrase} window {mode_word}")
             widgets["reset"].setText(f"Resets in {self._fmt_reset(window.get('resets_at'))}")
             widgets["date"].setText(self._fmt_reset_at(window.get("resets_at")))
-            refresh_widget_style(widgets["remaining"])
+            refresh_widget_style(widgets["value"])
+            # Re-measured here, not at build time: the percentage's leading digit is what
+            # sets the rail, and it changes as the window fills.
+            align_label_ink(widgets["value"], widgets["caption"])
 
         tokens = as_dict(self._data.get("tokens")) if self.config.show_token_usage else None
         if tokens is not None:
@@ -1028,12 +1569,30 @@ class CodexUsageWidget(BaseWidget):
                 widgets["value"].setText(self._format_tokens(value))
                 widgets["bar"].set_ratio(float(value) / model_maximum if model_maximum else 0)
 
+        if is_valid_qobject(self._plan_label):
+            # With the footer on, the account is part of its closing line instead.
+            line = "" if self.config.footer.enabled else self._account_line()
+            self._plan_label.setText(line)
+            self._plan_label.setVisible(bool(line))
+            if line:
+                set_tooltip(self._plan_label, self._account_tooltip())
+                # The account line arrives with the data, so the rail is measured here
+                # rather than at build time, when this label is still empty.
+                align_label_ink(self._menu_title_label, self._plan_label)
+
         if self._detail_widgets:
             stale = bool(self._data.get("stale"))
-            self._detail_widgets["plan"].setText(str(self._data.get("plan") or "--"))
             credits = self._data.get("credits")
-            self._detail_widgets["credits"].setText(str(credits if credits is not None else "--"))
+            has_credits = credits is not None
+            self._detail_widgets["credits"].setText(str(credits) if has_credits else "")
+            self._detail_widgets["credits"].setVisible(has_credits)
+            if "credits" in self._detail_names:
+                self._detail_names["credits"].setVisible(has_credits)
             self._detail_widgets["updated"].setText(self._fmt_updated(self._data.get("fetched_at")))
+            # The footer says when the numbers arrived, so the row would say it twice.
+            self._detail_widgets["updated"].setVisible(not self.config.footer.enabled)
+            if "updated" in self._detail_names:
+                self._detail_names["updated"].setVisible(not self.config.footer.enabled)
             self._detail_widgets["status"].setText("Cached" if stale else "Live")
             self._detail_widgets["status"].setProperty("class", f"value status {'stale' if stale else 'live'}")
             error = str(self._data.get("error") or "") if stale else ""
@@ -1041,5 +1600,72 @@ class CodexUsageWidget(BaseWidget):
             self._detail_widgets["error"].setVisible(bool(error))
             set_tooltip(self._detail_widgets["error"], error)
             refresh_widget_style(self._detail_widgets["status"], self._detail_widgets["error"])
+        self._sync_hearts()
+        self._sync_meta()
         self._sync_reset_credits()
         self._sync_pager()
+
+    def _sync_hearts(self) -> None:
+        """The header hearts follow the main window, whatever its length (a week on some plans)."""
+        if self._hearts is None:
+            return
+        primary = self._window("primary")
+        used = primary.get("used")
+        used = float(used) if isinstance(used, (int, float)) else None
+        try:
+            self._hearts.set_state(
+                heart_halves(used), percent=used, window=self._window_phrase(primary.get("duration_mins"))
+            )
+        except RuntimeError:
+            self._hearts = None
+
+    def _stale_after(self) -> int:
+        configured = self.config.footer.stale_after
+        if configured:
+            return configured
+        # Serving from cache is normal for up to cache_ttl, so stale starts past that.
+        return max(3 * self.config.update_interval, self.config.cache_ttl + 2 * self.config.update_interval)
+
+    def _build_meta_line(self) -> QFrame:
+        """Closing line: whose plan these numbers are, and how fresh they are."""
+        frame = QFrame()
+        frame.setProperty("class", "meta")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._meta_account = QLabel("")
+        self._meta_account.setProperty("class", "account")
+        layout.addWidget(self._meta_account)
+        layout.addStretch()
+        self._meta_updated = QLabel("")
+        self._meta_updated.setProperty("class", "updated")
+        self._meta_updated.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._meta_updated)
+        return frame
+
+    def _sync_meta(self) -> None:
+        if self._meta_account is None:
+            return
+        try:
+            footer = self.config.footer
+            plan = str(self._data.get("plan") or "").strip().lower() if footer.show_plan else ""
+            email = str(self._data.get("email") or "").strip() if self.config.show_account else ""
+            signed_out = self.config.show_account and not email
+            account_text = " · ".join(p for p in (plan, "not signed in" if signed_out else email) if p)
+            self._meta_account.setText(self._clip(account_text, 40))
+            self._meta_account.setProperty("class", "account signed-out" if signed_out else "account")
+            set_tooltip(self._meta_account, self._account_tooltip())
+
+            fetched_at = self._data.get("fetched_at")
+            if not isinstance(fetched_at, (int, float)) or fetched_at <= 0:
+                updated, stale = "no data yet", True
+            else:
+                stamp = datetime.fromtimestamp(fetched_at).strftime("%H:%M")
+                stale = bool(self._data.get("stale")) or time.time() - fetched_at > self._stale_after()
+                updated = f"stale · {stamp}" if stale else f"updated {stamp}"
+            self._meta_updated.setText(updated)
+            self._meta_updated.setProperty("class", "updated stale" if stale else "updated")
+            refresh_widget_style(self._meta_account, self._meta_updated)
+        except RuntimeError:
+            self._meta_account = None
+            self._meta_updated = None

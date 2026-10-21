@@ -25,6 +25,7 @@ from ctypes import (
 from ctypes.wintypes import (
     BOOL,
     DWORD,
+    FILETIME,
     HANDLE,
     HMODULE,
     LONG,
@@ -261,6 +262,12 @@ kernel32.Process32NextW.restype = BOOL
 
 kernel32.TerminateProcess.argtypes = [HANDLE, DWORD]
 kernel32.TerminateProcess.restype = BOOL
+
+kernel32.GetExitCodeProcess.argtypes = [HANDLE, LPDWORD]
+kernel32.GetExitCodeProcess.restype = BOOL
+
+kernel32.GetProcessTimes.argtypes = [HANDLE, POINTER(FILETIME), POINTER(FILETIME), POINTER(FILETIME), POINTER(FILETIME)]
+kernel32.GetProcessTimes.restype = BOOL
 
 # GetLogicalProcessorInformationEx - Processor topology
 kernel32.GetLogicalProcessorInformationEx.argtypes = [ULONG, LPVOID, POINTER(DWORD)]

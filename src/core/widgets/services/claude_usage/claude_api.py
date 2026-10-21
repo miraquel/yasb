@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import time
 import urllib.request
 from typing import Any, ClassVar, cast
@@ -75,6 +76,65 @@ def _token_expired() -> bool:
         return (expires_at / 1000) < time.time()
     except Exception:
         return False
+
+
+def read_account() -> dict[str, str]:
+    """The signed-in Claude account, for showing *which* account the numbers belong to.
+
+    Claude Code records this in ``~/.claude.json`` under ``oauthAccount`` (the credentials
+    store holds only the token). Only the display fields are read - never the token or the
+    account UUIDs - and nothing here is logged or written to the usage cache.
+
+    Returns empty strings when signed out or unreadable, so callers can simply hide the line.
+    """
+    candidates = [
+        os.path.join(os.path.expanduser("~"), ".claude.json"),
+        os.path.join(claude_config_dir(), ".claude.json"),
+    ]
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as f:
+                account = json.load(f).get("oauthAccount") or {}
+        except Exception:
+            continue
+        if not isinstance(account, dict):
+            continue
+        email = str(account.get("emailAddress") or "").strip()
+        name = str(account.get("displayName") or "").strip()
+        organization = str(account.get("organizationName") or "").strip()
+        if email or name:
+            return {"email": email, "name": name, "organization": organization}
+    return {"email": "", "name": "", "organization": ""}
+
+
+_PLAN_NAMES = {"max": "Max", "pro": "Pro", "team": "Team", "enterprise": "Enterprise", "free": "Free"}
+
+
+def plan_name(subscription: str, rate_limit_tier: str = "") -> str:
+    """Display name for a subscription type, e.g. 'pro' -> 'Pro', 'max' + '..._max_5x' -> 'Max 5x'."""
+    subscription = subscription.strip().lower()
+    if not subscription:
+        return ""
+    name = _PLAN_NAMES.get(subscription, subscription.capitalize())
+    multiplier = re.search(r"max_(\d+)x", rate_limit_tier or "")
+    if subscription == "max" and multiplier:
+        name += f" {multiplier.group(1)}x"
+    return name
+
+
+def read_plan() -> str:
+    """The signed-in plan ('Pro', 'Max 5x', 'Team'), or '' when signed out or unreadable.
+
+    Claude Code stores the plan beside the OAuth token in ``.credentials.json``; only the
+    ``subscriptionType`` and ``rateLimitTier`` fields are read here, never the token.
+    """
+    try:
+        cred_path = os.path.join(claude_config_dir(), ".credentials.json")
+        with open(cred_path, encoding="utf-8") as f:
+            oauth = json.load(f).get("claudeAiOauth") or {}
+        return plan_name(str(oauth.get("subscriptionType") or ""), str(oauth.get("rateLimitTier") or ""))
+    except Exception:
+        return ""
 
 
 def _cache_path() -> str:
