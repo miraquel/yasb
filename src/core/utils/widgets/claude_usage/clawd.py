@@ -16,6 +16,7 @@ positions measured from the scene's left edge and *up* from the ground, the way 
 import math
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
@@ -148,9 +149,9 @@ _POSES = {
 }
 
 
-def _f(pose: str, n: int = 1, off: int = 0, x: int = 0, poof: str = "", shadow: str = "") -> list[dict]:
+def _f(pose: str, n: int = 1, off: int = 0, x: int = 0, poof: str = "", shadow: str = "") -> list[dict[str, Any]]:
     if pose.startswith("face:"):
-        frame = {"eyes": "open", "arms": "down", "feet": "both", "facing": pose[5:]}
+        frame: dict[str, Any] = {"eyes": "open", "arms": "down", "feet": "both", "facing": pose[5:]}
     else:
         eyes, arms, feet = _POSES.get(pose, pose).split("/")
         frame = {"eyes": eyes, "arms": arms, "feet": feet, "facing": ""}
@@ -158,11 +159,11 @@ def _f(pose: str, n: int = 1, off: int = 0, x: int = 0, poof: str = "", shadow: 
     return [frame] * n
 
 
-def _turn(facings: list[str], shadow: str = "") -> list[dict]:
+def _turn(facings: list[str], shadow: str = "") -> list[dict[str, Any]]:
     return [fr for p in facings for fr in _f(f"face:{p}", 1, shadow=shadow)]
 
 
-def _build_sequences() -> dict[str, list[dict]]:
+def _build_sequences() -> dict[str, list[dict[str, Any]]]:
     crouch = _f("default", 1, off=1, poof="dot") + _f("default", 1, off=1, poof="wave")
     rest = _f("default")
     blink_out = _f("closed/down/both") + rest
@@ -455,9 +456,9 @@ class Frame:
     # (left, top, opacity), relative to the body's top-left
     sweat: tuple[float, float, float] | None = None
     # (left, bottom, opacity) per grain
-    dust: list[tuple[float, float, float]] = field(default_factory=list)
+    dust: list[tuple[float, float, float]] = field(default_factory=list[tuple[float, float, float]])
     # (left, bottom, width, colour index) per flake
-    confetti: list[tuple[float, float, float, int]] = field(default_factory=list)
+    confetti: list[tuple[float, float, float, int]] = field(default_factory=list[tuple[float, float, float, int]])
     # (left, bottom, opacity)
     love: tuple[float, float, float] | None = None
     # (rects, mouth left, mouth bottom, opacity)
@@ -476,7 +477,9 @@ class Clawd:
     per animation tick, and ``click`` when someone pets him.
     """
 
-    def __init__(self, rng: random.Random | None = None, crit_percent: float = 85, clock=time.monotonic):
+    def __init__(
+        self, rng: random.Random | None = None, crit_percent: float = 85, clock: Callable[[], float] = time.monotonic
+    ):
         self._rng = rng or random.Random()
         self._clock = clock
         self.crit_percent = crit_percent
@@ -575,6 +578,7 @@ class Clawd:
         """One frame of the running one-shot animation; returns the bubble over his head."""
         t = self.act_t
         act = self.act
+        assert act is not None
         bubble = ""
         if act in SEQUENCES:
             # Claude Code's animations, frame by frame: the pose sets the gaze itself.

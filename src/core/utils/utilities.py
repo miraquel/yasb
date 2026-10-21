@@ -82,7 +82,7 @@ def refresh_widget_style(*widgets: QWidget | None) -> None:
             pass
 
 
-def align_label_text(root: QWidget) -> None:
+def align_label_text(root: QWidget | None) -> None:
     """Put every QLabel's text back on its box's left edge.
 
     Qt insets a QLabel's text whenever its style gives the label a frame, and any padding in
@@ -100,7 +100,7 @@ def align_label_text(root: QWidget) -> None:
         label.setIndent(0)
 
 
-def align_label_ink(*labels: QLabel) -> None:
+def align_label_ink(*labels: QLabel | None) -> None:
     """Put the first glyph's ink on a common left edge, for labels meant to share one.
 
     Aligning boxes is not aligning text. Every glyph carries a left side bearing, and it

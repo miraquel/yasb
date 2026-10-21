@@ -441,7 +441,7 @@ class ClaudeUsageWidget(BaseWidget):
     def _session_values(self) -> dict[str, str]:
         counts = count_sessions(self._sessions)
         sc = self.config.sessions
-        badge = []
+        badge: list[str] = []
         if counts[STATUS_WORKING]:
             badge.append(f"{sc.working_icon}{counts[STATUS_WORKING]}")
         if counts[STATUS_WAITING]:
@@ -836,7 +836,7 @@ class ClaudeUsageWidget(BaseWidget):
 
     def _sync_sessions_section(self) -> None:
         """Rebuild the session rows and refit the popup's height to them."""
-        if self._session_layout is None:
+        if self._session_layout is None or self._session_summary is None or self._session_rows is None:
             return
         sc = self.config.sessions
         icons = {STATUS_WORKING: sc.working_icon, STATUS_WAITING: sc.waiting_icon, STATUS_IDLE: sc.idle_icon}
@@ -844,7 +844,7 @@ class ClaudeUsageWidget(BaseWidget):
             self._session_summary.setText(self._sessions_summary_text())
             while self._session_layout.count():
                 item = self._session_layout.takeAt(0)
-                widget = item.widget()
+                widget = item.widget() if item is not None else None
                 if widget is not None:
                     # Detached now (not just deleteLater) so the size hint below is current.
                     widget.setParent(None)
@@ -909,7 +909,7 @@ class ClaudeUsageWidget(BaseWidget):
         return frame
 
     def _sync_meta(self) -> None:
-        if self._meta_account is None:
+        if self._meta_account is None or self._meta_updated is None:
             return
         try:
             email = self._account_line()

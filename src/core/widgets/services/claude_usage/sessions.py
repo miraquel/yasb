@@ -15,6 +15,7 @@ import ctypes
 import json
 import logging
 import os
+from collections.abc import Callable
 from ctypes import wintypes
 from glob import glob
 from typing import Any, ClassVar
@@ -63,7 +64,7 @@ def session_dirs(configured: list[str] | None = None) -> list[str]:
         roots = [os.environ.get("CLAUDE_CONFIG_DIR") or "", os.path.join(home, ".claude")]
         roots += sorted(glob(os.path.join(home, ".claude-*")))
     seen: set[str] = set()
-    dirs = []
+    dirs: list[str] = []
     for root in roots:
         if not root:
             continue
@@ -103,7 +104,7 @@ def parse_session(data: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def is_live(session: dict[str, Any], start_of=process_start) -> bool:
+def is_live(session: dict[str, Any], start_of: Callable[[int], int | None] = process_start) -> bool:
     """Whether the session's process is still the one that wrote the file."""
     started = start_of(session["pid"])
     if started is None:
@@ -113,7 +114,7 @@ def is_live(session: dict[str, Any], start_of=process_start) -> bool:
     return True
 
 
-def read_sessions(dirs: list[str], start_of=process_start) -> list[dict[str, Any]]:
+def read_sessions(dirs: list[str], start_of: Callable[[int], int | None] = process_start) -> list[dict[str, Any]]:
     """Every live session in ``dirs``, oldest first, each listed once."""
     sessions: dict[str, dict[str, Any]] = {}
     for directory in dirs:
@@ -149,7 +150,7 @@ class ClaudeSessionsService(QObject):
 
     data_ready = pyqtSignal(list)
 
-    _instances: ClassVar[dict[tuple, ClaudeSessionsService]] = {}
+    _instances: ClassVar[dict[tuple[int, tuple[str, ...]], ClaudeSessionsService]] = {}
 
     @classmethod
     def get_instance(cls, poll_interval_s: int, dirs: list[str]) -> ClaudeSessionsService:
@@ -161,14 +162,14 @@ class ClaudeSessionsService(QObject):
         inst._refcount += 1
         return inst
 
-    def __init__(self, poll_interval_s: int, dirs: list[str], _key: tuple):
+    def __init__(self, poll_interval_s: int, dirs: list[str], _key: tuple[int, tuple[str, ...]]):
         super().__init__()
         self._key = _key
         self._refcount = 0
         self._configured_dirs = dirs
         self._dirs = session_dirs(dirs)
         self._data: list[dict[str, Any]] = []
-        self._signature: tuple = ()
+        self._signature: tuple[tuple[Any, ...], ...] = ()
         self._ticks = 0
 
         self._timer = QTimer(self)

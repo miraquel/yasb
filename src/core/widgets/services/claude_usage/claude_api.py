@@ -94,11 +94,12 @@ def read_account() -> dict[str, str]:
     for path in candidates:
         try:
             with open(path, encoding="utf-8") as f:
-                account = json.load(f).get("oauthAccount") or {}
+                raw_account: Any = json.load(f).get("oauthAccount") or {}
         except Exception:
             continue
-        if not isinstance(account, dict):
+        if not isinstance(raw_account, dict):
             continue
+        account = cast(dict[str, Any], raw_account)
         email = str(account.get("emailAddress") or "").strip()
         name = str(account.get("displayName") or "").strip()
         organization = str(account.get("organizationName") or "").strip()
@@ -131,7 +132,7 @@ def read_plan() -> str:
     try:
         cred_path = os.path.join(claude_config_dir(), ".credentials.json")
         with open(cred_path, encoding="utf-8") as f:
-            oauth = json.load(f).get("claudeAiOauth") or {}
+            oauth: dict[str, Any] = json.load(f).get("claudeAiOauth") or {}
         return plan_name(str(oauth.get("subscriptionType") or ""), str(oauth.get("rateLimitTier") or ""))
     except Exception:
         return ""
