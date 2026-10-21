@@ -129,7 +129,7 @@ _SLEEPING = (*IDLE[12:15], "...#.########.#...", *IDLE[16:])
 
 def _pose(face: tuple[str, str, str] | None = None, body: tuple[str, ...] | None = None) -> tuple[str, ...]:
     """The idle pose with the face (rows 6-8) and/or the body (rows 12-19) swapped."""
-    rows = list(IDLE)
+    rows: list[str] = list(IDLE)
     if face is not None:
         rows[6:9] = face
     if body is not None:

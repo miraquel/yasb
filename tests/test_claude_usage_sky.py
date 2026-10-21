@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for the Claude popup's sky: sun and moon maths, weather kinds, the weather parsers and
 the Qt-free ``Sky`` model, driven with a seeded RNG and fixed times so nothing depends on the
 real clock, the real weather or the network.
@@ -9,6 +10,7 @@ import unittest
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -20,7 +22,9 @@ from core.utils.widgets.ai_usage import sky  # noqa: E402
 from core.utils.widgets.ai_usage.sky import (  # noqa: E402
     MOON_LIT,
     STAR,
+    Colour,
     Sky,
+    SkyFrame,
     Weather,
     apply_sky_settings,
     arc_point,
@@ -48,14 +52,15 @@ def make_sky(code: int | None = None, when: datetime | None = None, seed: int = 
     return s
 
 
-def run(s: Sky, when: datetime, frames: int = 120, w: float = 220, h: float = 50):
+def run(s: Sky, when: datetime, frames: int = 120, w: float = 220, h: float = 50) -> SkyFrame:
     frame = None
     for _ in range(frames):
         frame = s.step(w, h, when)
+    assert frame is not None
     return frame
 
 
-def colours(frame) -> set:
+def colours(frame: SkyFrame) -> set[Colour]:
     return {sprite.colour for sprite in frame.sprites}
 
 
@@ -82,7 +87,7 @@ class SunMoonTests(unittest.TestCase):
         self.assertNotIn("#", "".join(dark))
 
     def test_waxing_moon_is_lit_on_the_right_in_the_north_and_left_in_the_south(self):
-        def lit_side(rows):
+        def lit_side(rows: tuple[str, ...]) -> str:
             right = sum(row[4:].count("#") for row in rows)
             left = sum(row[:3].count("#") for row in rows)
             return "right" if right > left else "left"
@@ -94,6 +99,7 @@ class SunMoonTests(unittest.TestCase):
         self.assertIsNone(arc_point(-0.1, 200, 50))
         self.assertIsNone(arc_point(1.1, 200, 50))
         rise, noon = arc_point(0.0, 200, 50), arc_point(0.5, 200, 50)
+        assert rise is not None and noon is not None
         self.assertLess(noon[1], rise[1])  # higher on screen means a smaller y
         self.assertAlmostEqual(noon[0], 100)
 
@@ -140,7 +146,8 @@ class WeatherKindTests(unittest.TestCase):
         self.assertEqual(parse_met_no(met), {"code": 63, "temp": 28.0, "wind": 18.0})
 
     def test_parsers_reject_anything_else(self):
-        for payload in (None, {}, {"current": {}}, {"properties": {"timeseries": []}}):
+        payloads: tuple[dict[str, Any] | None, ...] = (None, {}, {"current": {}}, {"properties": {"timeseries": []}})
+        for payload in payloads:
             self.assertIsNone(parse_open_meteo(payload))
             self.assertIsNone(parse_met_no(payload))
 
@@ -212,7 +219,7 @@ class SkyTests(unittest.TestCase):
         self.assertGreater(wide._counts[1], narrow._counts[1])
 
     def test_tooltip_lines(self):
-        def clock(m):
+        def clock(m: float) -> str:
             return f"{int(m) // 60:02d}:{int(m) % 60:02d}"
 
         s = make_sky(0)

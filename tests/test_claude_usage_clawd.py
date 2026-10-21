@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -51,10 +52,10 @@ def run(model: Clawd, ticks: int, width: float = 150.0):
 
 
 class GeometryTests(unittest.TestCase):
-    def grid(self, geo):
+    def grid(self, geo: clawd.Geometry) -> set[tuple[int, int]]:
         """Occupied (column, row) pixels of the body and eyes, in grid units."""
-        cells = set()
-        for x, y, w, h in geo.body + geo.eyes:
+        cells: set[tuple[int, int]] = set()
+        for x, y, w, _ in geo.body + geo.eyes:
             for gx in range(round(x / clawd.PX), round((x + w) / clawd.PX)):
                 cells.add((gx, round(y / clawd.PY)))
         return cells
@@ -128,6 +129,7 @@ class MoodTests(unittest.TestCase):
         frame = model.step(150)
         self.assertEqual(model.act, "burrow")
         frame = run(model, clawd.ACT_LENGTHS["burrow"] + 2)
+        assert frame is not None
         self.assertIsNone(model.act)
         self.assertEqual(frame.mood, "sleep")
         self.assertIsNotNone(frame.zzz)
@@ -225,7 +227,7 @@ class MoodTests(unittest.TestCase):
         self.assertEqual(model.step(150).hearts, 4)
 
 
-def write_session(folder: Path, pid: int, **fields) -> None:
+def write_session(folder: Path, pid: int, **fields: Any) -> None:
     data = {"pid": pid, "sessionId": f"s-{pid}", "cwd": "C:\\work\\repo", "procStart": "100", "startedAt": pid}
     data.update(fields)
     (folder / f"{pid}.json").write_text(json.dumps(data), encoding="utf-8")
@@ -234,15 +236,20 @@ def write_session(folder: Path, pid: int, **fields) -> None:
 class SessionTests(unittest.TestCase):
     def test_parse_maps_status_and_names(self):
         session = parse_session({"pid": 5, "cwd": "D:\\code\\yasb", "status": "busy"})
+        assert session is not None
         self.assertEqual(session["status"], "working")
         self.assertEqual(session["name"], "yasb")
-        self.assertEqual(parse_session({"pid": 6, "status": "waiting"})["status"], "waiting")
-        self.assertEqual(parse_session({"pid": 7, "status": "idle", "name": "x"})["status"], "idle")
+        waiting = parse_session({"pid": 6, "status": "waiting"})
+        idle = parse_session({"pid": 7, "status": "idle", "name": "x"})
+        assert waiting is not None and idle is not None
+        self.assertEqual(waiting["status"], "waiting")
+        self.assertEqual(idle["status"], "idle")
         self.assertIsNone(parse_session({"cwd": "C:\\"}))
         self.assertIsNone(parse_session({"pid": "abc"}))
 
     def test_liveness_checks_start_time(self):
         session = parse_session({"pid": 9, "procStart": "1000000000"})
+        assert session is not None
         self.assertTrue(is_live(session, lambda pid: 1000000000 + 10_000_000))
         self.assertFalse(is_live(session, lambda pid: 1000000000 + 600_000_000))  # recycled pid
         self.assertFalse(is_live(session, lambda pid: None))

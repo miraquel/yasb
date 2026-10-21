@@ -12,6 +12,7 @@ import unittest
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -37,7 +38,7 @@ def local(year: int, month: int, day: int, hour: int = 12, minute: int = 0) -> d
     return datetime(year, month, day, hour, minute).astimezone()
 
 
-def snapshot(total: str, granted: str, topped_up: str, when: datetime, currency: str = "CNY") -> dict:
+def snapshot(total: str, granted: str, topped_up: str, when: datetime, currency: str = "CNY") -> dict[str, Any]:
     return {
         "ts": int(when.timestamp()),
         "total": total,
@@ -57,7 +58,8 @@ class ParseAmountTests(unittest.TestCase):
         self.assertEqual(parse_amount(Decimal("2.50")), Decimal("2.50"))
 
     def test_junk_and_missing_values_are_zero(self):
-        for value in (None, "", "  ", "abc", "1.2.3", [], {}, float("nan"), float("inf")):
+        junk: tuple[Any, ...] = (None, "", "  ", "abc", "1.2.3", [], {}, float("nan"), float("inf"))
+        for value in junk:
             self.assertEqual(parse_amount(value), Decimal("0"), msg=repr(value))
 
 

@@ -11,9 +11,10 @@ Everything is in Clawd's logical units. ``Sky.step`` advances one animation fram
 
 import math
 import random
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypedDict
 
 Colour = tuple[int, int, int, int]  # (alpha, red, green, blue)
 Rect = tuple[float, float, float, float]
@@ -30,14 +31,16 @@ def argb(hex_colour: str) -> Colour:
 def mix(a: Colour, b: Colour, k: float) -> Colour:
     """Blend ``a`` toward ``b`` by ``k`` (clamped to 0..1), alpha included."""
     k = min(1.0, max(0.0, k))
-    return tuple(round(x + (y - x) * k) for x, y in zip(a, b))
+    alpha, red, green, blue = (round(x + (y - x) * k) for x, y in zip(a, b))
+    return (alpha, red, green, blue)
 
 
 def dim(c: Colour, g: float) -> Colour:
     """Cloud cover ``g``: fade the colour toward its own grey and darken it; alpha is kept."""
     lum = 0.3 * c[1] + 0.59 * c[2] + 0.11 * c[3]
     f = 1 - 0.3 * g
-    return (c[0], *(min(255, max(0, round((v + (lum - v) * g) * f))) for v in c[1:]))
+    red, green, blue = (min(255, max(0, round((v + (lum - v) * g) * f))) for v in c[1:])
+    return (c[0], red, green, blue)
 
 
 # ----- palette -----
@@ -81,9 +84,16 @@ class WeatherKind:
     snow: int = 0
 
 
+class _KindExtra(TypedDict, total=False):
+    fog: bool
+    storm: bool
+    rain: int
+    snow: int
+
+
 # WMO weather codes, as Open-Meteo reports them. Three codes in a group are light, moderate
 # and heavy, and scale the drops or flakes by 0.6 / 1 / 1.35.
-_KINDS = (
+_KINDS: tuple[tuple[tuple[int, ...], str, str, float, _KindExtra], ...] = (
     ((0,), "clear", "clear", 0.0, {}),
     ((1,), "mostly_clear", "mostly clear", 0.2, {}),
     ((2,), "partly", "partly cloudy", 0.5, {}),
@@ -204,9 +214,11 @@ def moon_rows(age: float, southern: bool = False, n: int = 7) -> tuple[tuple[str
     th = 2 * math.pi * age / SYNODIC_MONTH
     k = math.cos(th)
     r = n / 2
-    lit, dark = [], []
+    lit: list[str] = []
+    dark: list[str] = []
     for y in range(n):
-        a, b = [], []
+        a: list[str] = []
+        b: list[str] = []
         for x in range(n):
             u = (x + 0.5 - r) / r
             v = (y + 0.5 - r) / r
@@ -255,9 +267,9 @@ FLASH_STEPS = (0.0, 0.18, 0.05, 0.0, 0.25, 0.1, 0.04)
 FLASH_CHANCE = 140  # one frame in this many, during a storm
 
 
-def pixel_rects(rows, px: float, dx: float = 0.0, dy: float = 0.0) -> tuple[Rect, ...]:
+def pixel_rects(rows: Iterable[str], px: float, dx: float = 0.0, dy: float = 0.0) -> tuple[Rect, ...]:
     """Rows of ``#`` / ``.`` as rectangles, one per horizontal run."""
-    rects = []
+    rects: list[Rect] = []
     for y, row in enumerate(rows):
         x = 0
         while x < len(row):
@@ -294,7 +306,7 @@ class Sprite:
 class SkyFrame:
     top: Colour
     bottom: Colour
-    sprites: list[Sprite] = field(default_factory=list)
+    sprites: list[Sprite] = field(default_factory=list[Sprite])
 
 
 @dataclass
@@ -334,9 +346,9 @@ class Sky:
         self.light = 0.0
         self._w = 0.0
         self._h = 0.0
-        self._key: tuple | None = None
-        self._moon_key: tuple | None = None
-        self._moon = ((), ())
+        self._key: tuple[int, int, float, float] | None = None
+        self._moon_key: tuple[int, bool] | None = None
+        self._moon: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
         self._top = PALETTE["night"][0]
         self._bottom = PALETTE["night"][1]
         self._fixed: list[Sprite] = []  # sun and moon: placed once a minute, not every frame
@@ -347,7 +359,7 @@ class Sky:
         self._flash = 0
 
         self._stars = [(rnd(), rnd() * 0.6) for _ in range(STARS)]
-        self._clouds = []
+        self._clouds: list[_Cloud] = []
         for i in range(CLOUDS):
             rows = CLOUD_SHAPES[i % len(CLOUD_SHAPES)]
             self._clouds.append(_Cloud(rows, len(rows[0]) * CLOUD_PX, -1.0, 0.05 + 0.3 * rnd(), 0.7 + 0.6 * rnd()))
@@ -370,11 +382,11 @@ class Sky:
             return wx
         return None
 
-    def describe(self, now: datetime, clock) -> list[str]:
+    def describe(self, now: datetime, clock: Callable[[float], str]) -> list[str]:
         """Tooltip lines: the weather, then sunrise and sunset. ``clock`` formats minutes."""
-        lines = []
+        lines: list[str] = []
         if self.force_phase or self.force_weather is not None:
-            what = [self.force_phase] if self.force_phase else []
+            what: list[str] = [self.force_phase] if self.force_phase else []
             if self.force_weather is not None:
                 what.append(weather_kind(self.force_weather).name)
             lines.append("preview · " + ", ".join(what))
@@ -506,7 +518,7 @@ class Sky:
             min(FLAKES, round(kind.snow * density)),
         )
 
-    def _moon_rows(self, now: datetime):
+    def _moon_rows(self, now: datetime) -> tuple[tuple[str, ...], tuple[str, ...]]:
         age = moon_age(now)
         southern = self.latitude is not None and self.latitude < 0
         key = (round(age * 2), southern)
@@ -555,7 +567,7 @@ class Sky:
         """Rain falls fast and slants with the wind."""
         w, h = self._w, self._h
         rnd = self._rng.random
-        rects = []
+        rects: list[Rect] = []
         for i, d in enumerate(self._drops):
             if i >= self._counts[1]:
                 d.y = -99.0
@@ -574,7 +586,7 @@ class Sky:
         """Snow falls slowly and sways."""
         w, h = self._w, self._h
         rnd = self._rng.random
-        rects = []
+        rects: list[Rect] = []
         for i, f in enumerate(self._flakes):
             if i >= self._counts[2]:
                 f.y = -99.0

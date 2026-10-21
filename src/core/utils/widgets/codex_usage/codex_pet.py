@@ -96,21 +96,21 @@ class CodexPet:
         self.act = act
         self.act_t = 0
 
-    def _step_act(self) -> tuple[str, float]:
+    def _step_act(self, act: str) -> tuple[str, float]:
         """One frame of the running reaction: its pose and how high it is off the ground."""
         t = self.act_t
         pose, lift = "failed", 0.0
-        if self.act == "jump":
+        if act == "jump":
             air = t - _CROUCH_FRAMES
             if 0 <= air < _AIR_FRAMES:
                 k = air / (_AIR_FRAMES - 1)
                 pose, lift = "jump", 28 * k * (1 - k)
             else:
                 pose = "crouch"
-        elif self.act == "wave":
+        elif act == "wave":
             pose = "wave-1" if (t // 4) % 2 == 0 else "wave-2"
         self.act_t += 1
-        if self.act_t >= ACT_LENGTHS[self.act]:
+        if self.act_t >= ACT_LENGTHS[act]:
             self.act = None
         return pose, lift
 
@@ -161,7 +161,7 @@ class CodexPet:
         mood = self.mood
         pose, look, cursor, face_opacity, lift, bubble = "idle", 0, True, 1.0, 0.0, ""
         if self.act:
-            pose, lift = self._step_act()
+            pose, lift = self._step_act(self.act)
         elif mood == "asleep":
             pose, face_opacity = "asleep", 0.4
         elif mood == "spent":

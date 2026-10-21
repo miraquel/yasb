@@ -1,3 +1,5 @@
+# pyright: reportPrivateUsage=false
+
 """The Codex popup's pager, built for real and fed data the way the service does.
 
 Nothing else opens this popup in tests, which is how an upstream type guard naming the old
@@ -64,6 +66,7 @@ class PagerTests(unittest.TestCase):
 
         self.assertEqual(widget._visible_pages, ["overview", "resets"])
         self.assertEqual(list(widget._page_tabs), ["overview", "resets"])
+        assert widget._page_navigation is not None
         self.assertFalse(widget._page_navigation.isHidden())
         self.assertEqual(widget._page_tabs["overview"].property("class"), "page-tab active")
 
@@ -82,11 +85,13 @@ class PagerTests(unittest.TestCase):
         widget._on_data(record())
 
         self.assertEqual(widget._visible_pages, ["overview"])
+        assert widget._page_navigation is not None
         self.assertTrue(widget._page_navigation.isHidden())
 
     def test_every_popup_label_sits_on_its_box_edge(self):
         widget = self.build(record())
 
+        assert widget._menu is not None
         labels = widget._menu.findChildren(QLabel)
         self.assertTrue(labels)
         self.assertEqual([label for label in labels if label.indent() != 0], [])

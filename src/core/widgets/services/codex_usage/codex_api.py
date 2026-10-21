@@ -327,7 +327,7 @@ def read_rate_limits(codex_path: str, timeout: float, read_account: bool = False
         except Exception as error:
             logger.debug("Codex account read unavailable: %s", error)
             return limits
-        if isinstance(account, dict) and isinstance(account.get("account"), dict):
+        if isinstance(account.get("account"), dict):
             limits["_account"] = account["account"]
         return limits
     finally:
@@ -414,7 +414,7 @@ def normalize_rate_limits(payload: dict[str, Any]) -> dict[str, Any]:
 
     # account/read is the authoritative source for both, and is the only place the email
     # appears; the rate-limit payload carries planType but no identity.
-    account = payload.get("_account") if isinstance(payload.get("_account"), dict) else {}
+    account = as_dict(payload.get("_account")) or {}
     email = str(account.get("email") or "").strip()
 
     return {

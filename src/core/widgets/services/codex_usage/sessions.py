@@ -19,6 +19,7 @@ import os
 import re
 import sqlite3
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -197,7 +198,7 @@ def read_codex_sessions(
     markers_dir: str,
     now: float,
     idle_minutes: int = 30,
-    probe=lock_state,
+    probe: Callable[[str], str] = lock_state,
     items_live: bool = True,
 ) -> list[dict[str, Any]] | None:
     """Every live Codex session, newest first; None when a database cannot be read right now."""
@@ -216,18 +217,22 @@ def read_codex_sessions(
         threads, parents = _read_state(state_db, open_ids)
         con = _connect(history_db) if history_db else None
         try:
-            turns = _latest_turns(con, open_ids) if con else {}
+            turns: dict[str, dict[str, Any]] = {}
             states: dict[str, tuple[str, str]] = {}
-            for thread_id, turn in turns.items():
-                if turn["status"] != "inProgress" or now - _last_sign_of_life(con, thread_id, turn) > _STALE_TURN_S:
-                    continue
-                marker = read_marker(markers_dir, thread_id)
-                waiting = (
-                    marker is not None
-                    and marker["turn_id"] == turn["turn_id"]
-                    and not (items_live and _answered_since(con, thread_id, turn["turn_id"], marker["at_ms"]))
-                )
-                states[thread_id] = (STATUS_WAITING, marker["tool_name"]) if waiting else (STATUS_WORKING, "")
+            if con is not None:
+                turns = _latest_turns(con, open_ids)
+                for thread_id, turn in turns.items():
+                    if turn["status"] != "inProgress" or now - _last_sign_of_life(con, thread_id, turn) > _STALE_TURN_S:
+                        continue
+                    marker = read_marker(markers_dir, thread_id)
+                    if (
+                        marker is not None
+                        and marker["turn_id"] == turn["turn_id"]
+                        and not (items_live and _answered_since(con, thread_id, turn["turn_id"], marker["at_ms"]))
+                    ):
+                        states[thread_id] = (STATUS_WAITING, marker["tool_name"])
+                    else:
+                        states[thread_id] = (STATUS_WORKING, "")
         finally:
             if con is not None:
                 con.close()
@@ -250,7 +255,7 @@ def read_codex_sessions(
             continue
         listed.append(thread_id)
 
-    sessions = []
+    sessions: list[dict[str, Any]] = []
     for thread_id in listed:
         row = threads[thread_id]
         turn = turns.get(thread_id, {})
@@ -287,7 +292,7 @@ def read_codex_sessions(
 def turn_events(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> list[str]:
     """``finished`` / ``failed`` for each session whose running turn ended between two reads."""
     previous = {s["session_id"]: (s["turn_id"], s["turn_status"]) for s in before}
-    events = []
+    events: list[str] = []
     for session in after:
         turn_id, status = previous.get(session["session_id"], ("", ""))
         if status != "inProgress" or session["turn_id"] != turn_id:
@@ -309,7 +314,7 @@ class CodexSessionsService(QObject):
 
     data_ready = pyqtSignal(list)
 
-    _instances: ClassVar[dict[tuple, CodexSessionsService]] = {}
+    _instances: ClassVar[dict[tuple[int, int], CodexSessionsService]] = {}
 
     @classmethod
     def get_instance(cls, poll_interval_s: int, idle_minutes: int) -> CodexSessionsService:
@@ -321,7 +326,7 @@ class CodexSessionsService(QObject):
         inst._refcount += 1
         return inst
 
-    def __init__(self, poll_interval_s: int, idle_minutes: int, _key: tuple):
+    def __init__(self, poll_interval_s: int, idle_minutes: int, _key: tuple[int, int]):
         super().__init__()
         self._key = _key
         self._refcount = 0
@@ -329,7 +334,7 @@ class CodexSessionsService(QObject):
         self._home = codex_home()
         self._markers = str(app_data_path("codex-waiting"))
         self._data: list[dict[str, Any]] = []
-        self._signature: tuple = ()
+        self._signature: tuple[tuple[Any, ...], ...] = ()
         self._clock = time.monotonic
         self._last_good = self._clock()
 

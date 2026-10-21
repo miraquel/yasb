@@ -1,3 +1,5 @@
+# pyright: reportPrivateUsage=false
+
 """Tests for reading live Codex sessions from Codex's own files.
 
 Each test builds a throwaway Codex home: the two SQLite databases with only the columns the
@@ -13,7 +15,9 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -40,18 +44,35 @@ NOW = 1_800_000_000.0
 _THREAD_COLUMNS = ("id", "name", "title", "cwd", "source", "originator", "thread_source", "updated_at", "archived")
 
 
-def thread(thread_id: str, **fields) -> dict:
-    row = {"name": None, "title": "", "cwd": "", "source": "cli", "originator": None, "thread_source": "user"}
+def thread(thread_id: str, **fields: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "name": None,
+        "title": "",
+        "cwd": "",
+        "source": "cli",
+        "originator": None,
+        "thread_source": "user",
+    }
     row.update(updated_at=0, archived=0, id=thread_id)
     row.update(fields)
     return row
 
 
-def turn(thread_id: str, turn_id: str, status: str, started_at: float, completed_at: float | None = None) -> tuple:
+Turn = tuple[str, str, str, int, int | None]
+
+
+def turn(thread_id: str, turn_id: str, status: str, started_at: float, completed_at: float | None = None) -> Turn:
     return (thread_id, turn_id, status, int(started_at), None if completed_at is None else int(completed_at))
 
 
-def make_home(root: Path, threads, turns, items=(), edges=(), versions=(5, 1)) -> Path:
+def make_home(
+    root: Path,
+    threads: Iterable[dict[str, Any]],
+    turns: Iterable[Turn],
+    items: Iterable[tuple[str, str, int, int | None]] = (),
+    edges: Iterable[tuple[str, str]] = (),
+    versions: tuple[int, int] = (5, 1),
+) -> Path:
     """A Codex home with ``state_<v>.sqlite``, ``thread_history_<v>.sqlite`` and a lock per thread."""
     home = root / "codex"
     (home / "thread-writer-locks").mkdir(parents=True)
@@ -84,7 +105,7 @@ def make_home(root: Path, threads, turns, items=(), edges=(), versions=(5, 1)) -
     return home
 
 
-def probe(**states: str):
+def probe(**states: str) -> Callable[[str], str]:
     """A lock probe that reports the given state per thread id, and stale for the rest."""
     return lambda path: states.get(Path(path).stem, LOCK_STALE)
 
@@ -99,10 +120,12 @@ class CodexSessionsTest(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def read(self, home: Path, idle_minutes: int = 30, items_live: bool = True, **states: str):
-        return read_codex_sessions(
+    def read(self, home: Path, idle_minutes: int = 30, items_live: bool = True, **states: str) -> list[dict[str, Any]]:
+        sessions = read_codex_sessions(
             str(home), str(self.markers), NOW, idle_minutes, probe=probe(**states), items_live=items_live
         )
+        assert sessions is not None
+        return sessions
 
     def mark(self, thread_id: str, turn_id: str, tool: str = "shell", at_ms: int = int(NOW * 1000) - 5000) -> None:
         marker = {"turn_id": turn_id, "tool_name": tool, "at_ms": at_ms}
@@ -113,7 +136,9 @@ class CodexSessionsTest(unittest.TestCase):
         home.mkdir()
         for name in ("state_5.sqlite", "state_12.sqlite", "state_7.sqlite", "state_x.sqlite"):
             (home / name).write_bytes(b"")
-        self.assertTrue(latest_db(str(home), "state").endswith("state_12.sqlite"))
+        latest = latest_db(str(home), "state")
+        assert latest is not None
+        self.assertTrue(latest.endswith("state_12.sqlite"))
         self.assertIsNone(latest_db(str(home), "thread_history"))
 
     def test_lock_state_reads_held_lock_as_open(self):
@@ -267,7 +292,7 @@ class CodexSessionsTest(unittest.TestCase):
         self.assertEqual(app_hint(None, "vscode"), "")
 
     def test_turn_events_finished_and_failed(self):
-        def s(session_id: str, turn_id: str, status: str) -> dict:
+        def s(session_id: str, turn_id: str, status: str) -> dict[str, Any]:
             return {"session_id": session_id, "turn_id": turn_id, "turn_status": status}
 
         before = [s("a", "u1", "inProgress"), s("b", "u7", "inProgress"), s("c", "u3", "inProgress")]
@@ -281,7 +306,7 @@ class CodexSessionsTest(unittest.TestCase):
     def test_unreadable_database_returns_none(self):
         home = make_home(self.root, [thread("t1")], [turn("t1", "u1", "inProgress", NOW - 20)])
         (home / "state_5.sqlite").write_bytes(b"this is not a database" * 100)
-        self.assertIsNone(self.read(home, t1=LOCK_OPEN))
+        self.assertIsNone(read_codex_sessions(str(home), str(self.markers), NOW, probe=probe(t1=LOCK_OPEN)))
 
     def test_marker_with_bom_and_garbage(self):
         marker = {"turn_id": "u2", "tool_name": "shell", "at_ms": 5}
@@ -312,9 +337,13 @@ class CodexSessionsServiceTest(unittest.TestCase):
         session = {"session_id": "t1", "status": "working", "turn_id": "u1", "turn_status": "inProgress"}
         session.update(name="fix tests", tool="")
         reads = [[session]]
-        with mock.patch.object(sessions_module, "read_codex_sessions", lambda *a, **k: reads.pop(0) if reads else None):
-            service = sessions_module.CodexSessionsService(60, 30, ("test",))
-            got: list[list] = []
+
+        def fake_read(*a: Any, **k: Any) -> list[dict[str, str]] | None:
+            return reads.pop(0) if reads else None
+
+        with mock.patch.object(sessions_module, "read_codex_sessions", fake_read):
+            service = sessions_module.CodexSessionsService(60, 30, (60, 30))
+            got: list[list[dict[str, Any]]] = []
             service.data_ready.connect(got.append)
             self.assertEqual(service.latest(), [session])
             now = [1000.0]

@@ -6,38 +6,55 @@ lives (and is tested) in the models. Every colour arrives from the stylesheet as
 ``-qproperty-``; the defaults only apply until styles.css says otherwise.
 """
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtProperty
-from PyQt6.QtGui import QColor, QImage, QLinearGradient, QPainter, QRadialGradient
-from PyQt6.QtWidgets import QFrame
+from collections.abc import Callable, Iterable
+from typing import Any
+
+import PyQt6.QtCore as QtCore
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
+from PyQt6.QtGui import (
+    QColor,
+    QHideEvent,
+    QImage,
+    QLinearGradient,
+    QPainter,
+    QPaintEvent,
+    QRadialGradient,
+    QResizeEvent,
+    QShowEvent,
+)
+from PyQt6.QtWidgets import QFrame, QWidget
 
 from core.utils.tooltip import set_tooltip
 from core.utils.widgets.ai_usage import hearts
 from core.utils.widgets.ai_usage.sky import Colour, Sky, SkyFrame
+
+# pyqtProperty exists at runtime but is missing from the PyQt6 type stubs
+pyqtProperty: Callable[..., Any] = getattr(QtCore, "pyqtProperty")
 
 # The pets' and the sky's animation tick.
 FRAME_MS = 90
 HEART_GAP = 2.5
 
 
-def colour_property(attr: str) -> pyqtProperty:
-    def getter(self) -> QColor:
+def colour_property(attr: str) -> Any:
+    def getter(self: QWidget) -> QColor:
         return getattr(self, attr)
 
-    def setter(self, value: QColor) -> None:
+    def setter(self: QWidget, value: QColor) -> None:
         setattr(self, attr, QColor(value))
         self.update()
 
     return pyqtProperty(QColor, getter, setter)
 
 
-def percent_property(attr: str) -> pyqtProperty:
+def percent_property(attr: str) -> Any:
     # Whole percentages rather than floats: an int -qproperty- is what QSS reliably converts.
-    def getter(self) -> int:
+    def getter(self: SkyScene) -> int:
         return getattr(self, attr)
 
-    def setter(self, value: int) -> None:
+    def setter(self: SkyScene, value: int) -> None:
         setattr(self, attr, max(0, min(100, int(value))))
-        self._render()
+        self._render()  # pyright: ignore[reportPrivateUsage]
         self.update()
 
     return pyqtProperty(int, getter, setter)
@@ -48,7 +65,7 @@ def qcolor(colour: Colour, alpha_scale: float = 1.0) -> QColor:
     return QColor(r, g, b, max(0, min(255, round(a * alpha_scale))))
 
 
-def fill_rects(painter: QPainter, rects, dx: float, dy: float, colour: QColor) -> None:
+def fill_rects(painter: QPainter, rects: Iterable[hearts.Rect], dx: float, dy: float, colour: QColor) -> None:
     for x, y, w, h in rects:
         painter.fillRect(QRectF(dx + x, dy + y, w, h), colour)
 
@@ -92,8 +109,8 @@ class HeartsView(QFrame):
         self._beat = beat
         self.update()
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
+        super().paintEvent(a0)
         if self._halves is None:
             return
         painter = QPainter(self)
@@ -150,17 +167,17 @@ class SkyScene(QFrame):
     def set_tip(self, text: str) -> None:
         set_tooltip(self, text)
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        super().showEvent(a0)
         self._tick()
         self._timer.start()
 
-    def hideEvent(self, event):
+    def hideEvent(self, a0: QHideEvent | None) -> None:
         self._timer.stop()
-        super().hideEvent(event)
+        super().hideEvent(a0)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
         if self.isVisible():
             self._tick()
 
@@ -226,8 +243,8 @@ class SkyScene(QFrame):
         painter.end()
         self._image = image
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
+        super().paintEvent(a0)
         if self._image is None:
             return
         painter = QPainter(self)
