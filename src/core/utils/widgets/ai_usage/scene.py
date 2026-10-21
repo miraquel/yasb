@@ -11,7 +11,17 @@ from typing import Any
 
 import PyQt6.QtCore as QtCore
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
-from PyQt6.QtGui import QColor, QImage, QLinearGradient, QPainter, QRadialGradient
+from PyQt6.QtGui import (
+    QColor,
+    QHideEvent,
+    QImage,
+    QLinearGradient,
+    QPainter,
+    QPaintEvent,
+    QRadialGradient,
+    QResizeEvent,
+    QShowEvent,
+)
 from PyQt6.QtWidgets import QFrame, QWidget
 
 from core.utils.tooltip import set_tooltip
@@ -99,8 +109,8 @@ class HeartsView(QFrame):
         self._beat = beat
         self.update()
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
+        super().paintEvent(a0)
         if self._halves is None:
             return
         painter = QPainter(self)
@@ -157,17 +167,17 @@ class SkyScene(QFrame):
     def set_tip(self, text: str) -> None:
         set_tooltip(self, text)
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        super().showEvent(a0)
         self._tick()
         self._timer.start()
 
-    def hideEvent(self, event):
+    def hideEvent(self, a0: QHideEvent | None) -> None:
         self._timer.stop()
-        super().hideEvent(event)
+        super().hideEvent(a0)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
         if self.isVisible():
             self._tick()
 
@@ -233,8 +243,8 @@ class SkyScene(QFrame):
         painter.end()
         self._image = image
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
+        super().paintEvent(a0)
         if self._image is None:
             return
         painter = QPainter(self)

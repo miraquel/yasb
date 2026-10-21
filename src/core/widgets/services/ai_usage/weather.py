@@ -120,7 +120,7 @@ class SkyWeatherService(QObject):
 
     data_ready = pyqtSignal(dict)
 
-    _instances: ClassVar[dict[tuple, SkyWeatherService]] = {}
+    _instances: ClassVar[dict[tuple[float, float, int], SkyWeatherService]] = {}
 
     @classmethod
     def get_instance(cls, lat: float, lon: float, interval_s: int) -> SkyWeatherService:
@@ -132,7 +132,7 @@ class SkyWeatherService(QObject):
         inst._refcount += 1
         return inst
 
-    def __init__(self, lat: float, lon: float, interval_s: int, _key: tuple):
+    def __init__(self, lat: float, lon: float, interval_s: int, _key: tuple[float, float, int]):
         super().__init__()
         self._key = _key
         self._lat = lat
