@@ -2,6 +2,7 @@ import re
 import time
 from calendar import monthrange
 from datetime import date, datetime
+from functools import partial
 from math import log1p
 from typing import Any, override
 
@@ -407,7 +408,7 @@ class CodexUsageWidget(BaseWidget):
     def _session_values(self) -> dict[str, str]:
         counts = count_sessions(self._sessions)
         sc = self.config.sessions
-        badge = []
+        badge: list[str] = []
         if counts[STATUS_WORKING]:
             badge.append(f"{sc.working_icon}{counts[STATUS_WORKING]}")
         if counts[STATUS_WAITING]:
@@ -578,7 +579,7 @@ class CodexUsageWidget(BaseWidget):
 
     def _account_tooltip(self) -> str:
         """Email and plan together, where the header line has room for only one."""
-        parts = []
+        parts: list[str] = []
         email = str(self._data.get("email") or "").strip()
         plan = str(self._data.get("plan") or "").strip()
         if email:
@@ -1215,10 +1216,10 @@ class CodexUsageWidget(BaseWidget):
             if height == self._page_stack.height():
                 return
             self._page_stack.setFixedHeight(height)
-            if is_valid_qobject(self._menu) and self._menu.isVisible():
+            if is_valid_qobject(self._menu) and self._menu.isVisible() and (layout := self._menu.layout()) is not None:
                 # activate() forces the pending layout pass now; Qt invalidates the cached
                 # size hint lazily, so without it the popup would resize one page behind.
-                self._menu.layout().activate()
+                layout.activate()
                 self._menu.resize(self._menu.width(), self._menu.sizeHint().height())
         except RuntimeError:
             self._page_stack = None
@@ -1272,6 +1273,8 @@ class CodexUsageWidget(BaseWidget):
         titles = {"overview": overview_title, "resets": "Resets", "models": "Models", "activity": "Activity"}
 
         if list(self._page_tabs) != visible_pages:
+            if self._page_tab_layout is None:
+                return
             for button in self._page_tabs.values():
                 self._page_tab_layout.removeWidget(button)
                 button.setParent(None)
@@ -1281,7 +1284,7 @@ class CodexUsageWidget(BaseWidget):
                 button = QPushButton(titles[name])
                 button.setProperty("class", "page-tab")
                 button.setAccessibleName(f"{titles[name]} page")
-                button.clicked.connect(lambda _=False, page=name: self._select_page(page))
+                button.clicked.connect(partial(self._select_page, name))
                 # Insert before the trailing stretch so the strip stays left-aligned.
                 self._page_tab_layout.insertWidget(position, button)
                 self._page_tabs[name] = button
@@ -1417,7 +1420,7 @@ class CodexUsageWidget(BaseWidget):
 
     def _sync_sessions_section(self) -> None:
         """Rebuild the session rows and refit the popup's height to them."""
-        if self._session_layout is None:
+        if self._session_layout is None or self._session_summary is None or self._session_rows is None:
             return
         sc = self.config.sessions
         icons = {STATUS_WORKING: sc.working_icon, STATUS_WAITING: sc.waiting_icon, STATUS_IDLE: sc.idle_icon}
@@ -1425,7 +1428,7 @@ class CodexUsageWidget(BaseWidget):
             self._session_summary.setText(self._sessions_summary_text())
             while self._session_layout.count():
                 item = self._session_layout.takeAt(0)
-                widget = item.widget()
+                widget = item.widget() if item is not None else None
                 if widget is not None:
                     # Detached now (not just deleteLater) so the size hint below is current.
                     widget.setParent(None)
@@ -1454,9 +1457,9 @@ class CodexUsageWidget(BaseWidget):
                 self._session_layout.addWidget(more, len(shown), 1, 1, 2)
             self._session_rows.setVisible(bool(shown))
             align_label_text(self._session_rows)
-            if is_valid_qobject(self._menu) and self._menu.isVisible():
+            if is_valid_qobject(self._menu) and self._menu.isVisible() and (layout := self._menu.layout()) is not None:
                 # Recompute now, then resize the height only, as _fit_page_height does.
-                self._menu.layout().activate()
+                layout.activate()
                 self._menu.resize(self._menu.width(), self._menu.sizeHint().height())
         except RuntimeError:
             self._session_summary = None
@@ -1644,7 +1647,7 @@ class CodexUsageWidget(BaseWidget):
         return frame
 
     def _sync_meta(self) -> None:
-        if self._meta_account is None:
+        if self._meta_account is None or self._meta_updated is None:
             return
         try:
             footer = self.config.footer

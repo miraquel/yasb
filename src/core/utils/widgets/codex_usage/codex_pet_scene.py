@@ -6,8 +6,10 @@ stylesheet as ``-qproperty-``s on ``.codex-usage-menu .codex-pet``; the defaults
 blue, navy and cyan, and only apply until styles.css says otherwise.
 """
 
-from PyQt6.QtCore import QRectF, QSize, Qt, QTimer
-from PyQt6.QtGui import QColor, QFont, QPainter
+from typing import override
+
+from PyQt6.QtCore import QEvent, QRectF, QSize, Qt, QTimer
+from PyQt6.QtGui import QColor, QFont, QHideEvent, QMouseEvent, QPainter, QPaintEvent, QShowEvent
 from PyQt6.QtWidgets import QFrame, QSizePolicy
 
 from core.utils.tooltip import set_tooltip
@@ -72,14 +74,16 @@ class CodexPetScene(QFrame):
             tip += f"\n{self._tip_extra}"
         set_tooltip(self, tip)
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    @override
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        super().showEvent(a0)
         self._tick()
         self._timer.start()
 
-    def hideEvent(self, event):
+    @override
+    def hideEvent(self, a0: QHideEvent | None) -> None:
         self._timer.stop()
-        super().hideEvent(event)
+        super().hideEvent(a0)
 
     def _tick(self) -> None:
         frame = self.model.step(self.width() / self._scale, self._mouse_x)
@@ -99,29 +103,39 @@ class CodexPetScene(QFrame):
         top = self._ground() - self._frame.lift - HEIGHT
         return QRectF(self._frame.x * s, top * s, WIDTH * s, HEIGHT * s).adjusted(-6, -6, 6, 6)
 
-    def mouseMoveEvent(self, event):
-        self._mouse_x = event.position().x() / self._scale
-        body = self._body_rect()
-        over = body is not None and body.contains(event.position())
-        self.setCursor(Qt.CursorShape.PointingHandCursor if over else Qt.CursorShape.ArrowCursor)
-        super().mouseMoveEvent(event)
+    @override
+    def mouseMoveEvent(self, a0: QMouseEvent | None) -> None:
+        if a0 is not None:
+            self._mouse_x = a0.position().x() / self._scale
+            body = self._body_rect()
+            over = body is not None and body.contains(a0.position())
+            self.setCursor(Qt.CursorShape.PointingHandCursor if over else Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(a0)
 
-    def leaveEvent(self, event):
+    @override
+    def leaveEvent(self, a0: QEvent | None) -> None:
         self._mouse_x = None
-        super().leaveEvent(event)
+        super().leaveEvent(a0)
 
-    def mousePressEvent(self, event):
+    @override
+    def mousePressEvent(self, a0: QMouseEvent | None) -> None:
         body = self._body_rect()
-        if event.button() == Qt.MouseButton.LeftButton and body is not None and body.contains(event.position()):
+        if (
+            a0 is not None
+            and a0.button() == Qt.MouseButton.LeftButton
+            and body is not None
+            and body.contains(a0.position())
+        ):
             self.model.click()
             # Taken here, so a pinned popup does not start a window drag from a pet.
-            event.accept()
+            a0.accept()
             return
-        super().mousePressEvent(event)
+        super().mousePressEvent(a0)
 
     # ----------------------------------------------------------------- painting ----
-    def paintEvent(self, event):
-        super().paintEvent(event)
+    @override
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
+        super().paintEvent(a0)
         frame = self._frame
         if frame is None:
             return

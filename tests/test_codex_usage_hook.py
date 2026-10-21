@@ -33,7 +33,7 @@ class CodexWaitingHookTest(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def run_hook(self, payload: dict) -> subprocess.CompletedProcess:
+    def run_hook(self, payload: dict[str, str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SCRIPT)],
             input=json.dumps(payload),
@@ -49,6 +49,7 @@ class CodexWaitingHookTest(unittest.TestCase):
         )
         self.assertEqual((result.returncode, result.stdout), (0, ""))
         marker = read_marker(str(self.markers), SID)
+        assert marker is not None
         self.assertEqual((marker["turn_id"], marker["tool_name"]), ("u2", "shell"))
         self.assertGreater(marker["at_ms"], 1_700_000_000_000)
 
