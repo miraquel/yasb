@@ -8,7 +8,9 @@ from core.utils.stat_popup import PinnablePopup, StatRow, build_stat_popup
 from core.utils.utilities import (
     PopupWidget,
     build_progress_widget,
+    level_color,
     refresh_widget_style,
+    set_container_level,
 )
 from core.validation.widgets.yasb.memory import MemoryConfig
 from core.widgets.base import BaseWidget
@@ -179,6 +181,10 @@ class MemoryWidget(BaseWidget):
             "{histogram}": "".join([self._get_histogram_bar(virtual_mem.percent, 0, 100)]),
         }
 
+        level = self._get_virtual_memory_threshold(virtual_mem.percent)
+        # On the container, so CSS can colour the icon too: .widget-container.status-high .icon
+        set_container_level(self._widget_container, level)
+
         if self.config.progress_bar.enabled and self.progress_widget:
             if self._widget_container_layout.indexOf(self.progress_widget) == -1:
                 self._widget_container_layout.insertWidget(
@@ -186,6 +192,9 @@ class MemoryWidget(BaseWidget):
                     self.progress_widget,
                 )
             self.progress_widget.set_value(virtual_mem.percent)
+            self.progress_widget.set_color(
+                level_color(self.config.progress_bar.level_colors, level, self.config.progress_bar.color)
+            )
 
         for part in label_parts:
             part = part.strip()
@@ -200,7 +209,7 @@ class MemoryWidget(BaseWidget):
                     active_widgets[widget_index].setText(part)
                     # Set memory threshold as property
                     label_class = "label alt" if self._show_alt_label else "label"
-                    new_class = f"{label_class} status-{self._get_virtual_memory_threshold(virtual_mem.percent)}"
+                    new_class = f"{label_class} status-{level}"
                     if active_widgets[widget_index].property("class") != new_class:
                         active_widgets[widget_index].setProperty("class", new_class)
                         refresh_widget_style(active_widgets[widget_index])

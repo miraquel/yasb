@@ -15,6 +15,14 @@ class GpuThresholdsConfig(CustomBaseModel):
     high: int = Field(default=90, ge=0, le=100)
 
 
+class GpuLevelColorsConfig(CustomBaseModel):
+    # One ring colour per gpu_thresholds level. A level left out keeps progress_bar.color.
+    low: str | None = None
+    medium: str | None = None
+    high: str | None = None
+    critical: str | None = None
+
+
 class GpuProgressBarConfig(CustomBaseModel):
     enabled: bool = False
     progress_type: Literal["circular", "linear_horizontal", "linear_vertical"] = "circular"
@@ -25,6 +33,9 @@ class GpuProgressBarConfig(CustomBaseModel):
     background_color: str = "#3C3C3C"
     position: Literal["left", "right"] = "left"
     animation: bool = True
+    # Paint the whole ring in the colour of the current gpu_thresholds level instead of
+    # `color`, whose gradient only shows the level at the arc's tip. Unset keeps `color`.
+    level_colors: GpuLevelColorsConfig | None = None
 
 
 class GpuMenuConfig(CustomBaseModel):

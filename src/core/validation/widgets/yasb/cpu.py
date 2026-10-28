@@ -15,6 +15,14 @@ class CpuThresholdsConfig(CustomBaseModel):
     high: int = Field(default=90, ge=0, le=100)
 
 
+class CpuLevelColorsConfig(CustomBaseModel):
+    # One ring colour per cpu_thresholds level. A level left out keeps progress_bar.color.
+    low: str | None = None
+    medium: str | None = None
+    high: str | None = None
+    critical: str | None = None
+
+
 class CpuProgressBarConfig(CustomBaseModel):
     enabled: bool = False
     progress_type: Literal["circular", "linear_horizontal", "linear_vertical"] = "circular"
@@ -25,6 +33,9 @@ class CpuProgressBarConfig(CustomBaseModel):
     background_color: str = "#3C3C3C"
     position: Literal["left", "right"] = "left"
     animation: bool = True
+    # Paint the whole ring in the colour of the current cpu_thresholds level instead of
+    # `color`, whose gradient only shows the level at the arc's tip. Unset keeps `color`.
+    level_colors: CpuLevelColorsConfig | None = None
 
 
 class CallbacksCpuConfig(CallbacksConfig):
