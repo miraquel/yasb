@@ -1,6 +1,6 @@
 # Volume Widget Options
 
-Displays your speaker volume and mute status. You can adjust the volume by scrolling your mouse wheel, click to mute/unmute, and open a popup menu to switch audio devices, manage app-specific volumes, and open sound settings.
+Displays your speaker volume and mute status. You can adjust the volume by scrolling your mouse wheel, click to mute/unmute, and open a popup menu to switch audio devices, manage app-specific volumes, and open sound settings. You can also have a volume slider slide out on the bar itself, next to the speaker icon.
 
 | Option       | Type   | Default                                                                 | Description                                                                 |
 |--------------|--------|-------------------------------------------------------------------------|-----------------------------------------------------------------------------|
@@ -16,6 +16,7 @@ Displays your speaker volume and mute status. You can adjust the volume by scrol
 | `callbacks`  | dict   | [See below](#callbacks) | Callbacks for mouse events on the volume widget. |
 | `audio_menu` | dict | [See below](#audio-menu-options)  | Menu settings for the widget. |
 | `keybindings` | list | `[]` | Optional hotkeys. See [Keybindings](./Keybindings). |
+| `inline_slider` | dict | [See below](#inline-slider-options)  | A volume slider that slides out on the bar, next to the speaker icon. Off by default. |
 | `progress_bar`       | dict    | [See below](#progress-bar-options) | Progress bar settings.    |
 
 
@@ -36,6 +37,7 @@ Available actions:
 - `update_label` - Refresh the label now.
 - `toggle_mute` - Mute or unmute the speakers.
 - `toggle_volume_menu` - Open or close the audio menu.
+- `toggle_inline_slider` - Slide the inline slider out or back in. Needs `inline_slider: {enabled: true}`.
 - `do_nothing` - Do nothing.
 - `exec <command>` - Run a command, for example `exec cmd.exe /c start ms-settings:network`.
 
@@ -113,6 +115,24 @@ volume:
         toggle_down: "\uf078" # Icon for btn collapsed state
         toggle_up: "\uf077" # Icon for btn expanded state
 ```
+## Inline Slider Options
+Clicking the speaker slides a slider out right on the bar, and the pill grows sideways to make room. Turn it on and bind `toggle_inline_slider` to a mouse button; the popup menu stays available on another button through `toggle_volume_menu`.
+```yaml
+volume:
+  type: "yasb.volume.VolumeWidget"
+  options:
+    label: "<span>{icon}</span>" # The slider shows the level, so the label can be the icon alone
+    inline_slider:
+      enabled: true # Build the slider; without this, toggle_inline_slider does nothing
+      width: 150 # Width of the slider in pixels
+      auto_close: 4000 # Close after this many milliseconds without interaction, 0 = never
+      show_value: true # Show the level as a number after the slider
+      animation_duration: 220 # Length of the slide in milliseconds, 0 = no animation
+    callbacks:
+      on_left: "toggle_inline_slider"
+      on_middle: "toggle_volume_menu"
+      on_right: "toggle_mute"
+```
 ## Description of Options
 
 - **label**: The format string for the volume label. Available placeholders are `{icon}` for the volume icon and `{level}` for the volume percentage or muted text.
@@ -141,6 +161,14 @@ volume:
     - **toggle_down**: Icon for the button in the collapsed state.
     - **toggle_up**: Icon for the button in the expanded state.
 - **keybindings**: A list of global hotkeys for this widget. See [Keybindings](./Keybindings).
+- **inline_slider**: A dictionary specifying the volume slider that slides out on the bar. It contains the following keys:
+  - **enabled**: Whether to build the slider. Default `false`. While it is off, `toggle_inline_slider` does nothing and the widget is exactly as without this option.
+  - **width**: The width of the slider in pixels, from 20 to 1000. Default `150`. The pill grows by this plus the value and the gaps your styles give them.
+  - **auto_close**: Close the slider after this many milliseconds without interaction. Default `4000`; `0` keeps it open until you click the speaker again. Moving the slider, scrolling over the widget, or keeping the pointer over the slider restarts the countdown.
+  - **show_value**: Whether to show the level as a number after the slider. Default `true`. It keeps room for three digits, so the bar doesn't shift as the level changes.
+  - **animation_duration**: How long the slide takes in milliseconds, from 0 to 2000. Default `220`; `0` opens and closes at once.
+
+  The slider runs from 0 to 100 and sets the master volume as you drag or click it. Dragging to 0 mutes and moving up again unmutes, the same as the slider in the audio menu. It follows changes made elsewhere (volume keys, the menu, the mouse wheel), the speaker icon keeps changing with the level and shows the mute state as before, and scrolling over the widget, slider included, steps the volume by `scroll_step` whether the slider is open or not. The slider slides out after the label, so with `label: "<span>{icon}</span>"` it sits right after the speaker icon. If the widget is in a grouper with `collapse_options` enabled, add it to `exclude_widgets`, or it is hidden along with the rest of the group.
 - **callbacks:** Mouse event callbacks. See [Callbacks](#callbacks).
 - **progress_bar**: A dictionary containing settings for the progress bar. It includes:
   - **enabled**: Whether the progress bar is enabled.
@@ -167,6 +195,13 @@ volume:
 .volume-widget .icon.no-device {} /* Applied when no audio device is connected */
 /* Volume progress bar styles if enabled */
 .volume-widget .progress-container {} 
+/* Inline slider styles (if inline_slider is enabled) */
+.volume-widget .inline-slider-container {} /* The frame that slides open, holds the slider and the value */
+.volume-widget .inline-slider {}
+.volume-widget .inline-slider::groove {}
+.volume-widget .inline-slider::sub-page {} /* The filled part, left of the handle */
+.volume-widget .inline-slider::handle {}
+.volume-widget .inline-value {}
 /* Audio menu styles */
 .volume-widget .audio-menu {}
 /* System volume */
@@ -254,6 +289,35 @@ volume:
 }
 .audio-menu .apps-container .app-volume .app-icon-container:hover {
     background-color: rgba(255, 255, 255, 0.1);
+}
+/* Inline slider (if inline_slider is enabled) */
+.volume-widget .inline-slider-container {
+    padding-left: 8px; /* Gap between the icon and the slider */
+}
+.volume-widget .inline-slider {
+    background: transparent;
+    border: none;
+    min-height: 12px;
+}
+.volume-widget .inline-slider::groove {
+    height: 4px;
+    border-radius: 2px;
+    background-color: #45475a;
+}
+.volume-widget .inline-slider::sub-page {
+    border-radius: 2px;
+    background-color: #89b4fa;
+}
+.volume-widget .inline-slider::handle {
+    width: 12px;
+    margin: -4px 0; /* The handle overhangs the 4px groove by 4px above and below */
+    border-radius: 6px;
+    background-color: #cdd6f4;
+}
+.volume-widget .inline-value {
+    padding-left: 8px; /* Gap between the slider and the value */
+    font-size: 11px;
+    color: #cdd6f4;
 }
 ```
 

@@ -42,6 +42,14 @@ class VolumeProgressBarConfig(CustomBaseModel):
     animation: bool = True
 
 
+class VolumeInlineSliderConfig(CustomBaseModel):
+    enabled: bool = False
+    width: int = Field(default=150, ge=20, le=1000)
+    auto_close: int = Field(default=4000, ge=0, le=600000)
+    show_value: bool = True
+    animation_duration: int = Field(default=220, ge=0, le=2000)
+
+
 class VolumeCallbacksConfig(CallbacksConfig):
     on_left: str = "toggle_volume_menu"
     on_right: str = "toggle_mute"
@@ -65,6 +73,7 @@ class VolumeConfig(CustomBaseModel):
         "100": "\uf028",  # Icon for 61-100% volume
     }
     audio_menu: AudioMenuConfig = AudioMenuConfig()
+    inline_slider: VolumeInlineSliderConfig = VolumeInlineSliderConfig()
     progress_bar: VolumeProgressBarConfig = VolumeProgressBarConfig()
     keybindings: list[KeybindingConfig] = []
     callbacks: VolumeCallbacksConfig = VolumeCallbacksConfig()

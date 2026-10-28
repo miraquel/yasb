@@ -17,6 +17,7 @@ from core.utils.utilities import (
     build_progress_widget,
     refresh_widget_style,
 )
+from core.utils.widgets.volume.inline_slider import InlineVolumeSlider
 from core.utils.win32.bindings.user32 import user32
 from core.utils.win32.utils import get_app_name_from_pid
 from core.validation.widgets.yasb.volume import VolumeConfig
@@ -54,10 +55,18 @@ class VolumeWidget(BaseWidget):
         self._init_container()
         self.build_widget_label(self.config.label, self.config.label_alt)
 
+        self._inline_slider: InlineVolumeSlider | None = None
+        if self.config.inline_slider.enabled:
+            self._inline_slider = InlineVolumeSlider(self.config.inline_slider, self.config.scroll_step)
+            self._inline_slider.level_changed.connect(self._on_inline_slider_changed)
+            self._inline_slider.released.connect(self._on_slider_released)
+            self._widget_container_layout.addWidget(self._inline_slider)
+
         self.register_callback("toggle_label", self._toggle_label)
         self.register_callback("update_label", self._update_label)
         self.register_callback("toggle_mute", self.toggle_mute)
         self.register_callback("toggle_volume_menu", self._toggle_volume_menu)
+        self.register_callback("toggle_inline_slider", self._toggle_inline_slider)
 
         self.callback_left = self.config.callbacks.on_left
         self.callback_right = self.config.callbacks.on_right
@@ -82,6 +91,8 @@ class VolumeWidget(BaseWidget):
         """Update volume interface reference after device change."""
         # Service already reinitialized, just update our reference
         self.volume = self._service.get_volume_interface()
+        if self.volume is None and self._inline_slider is not None:
+            self._inline_slider.collapse()
 
         # Close dialog if open (device change means menu data is stale)
         if self.dialog is not None and is_valid_qobject(self.dialog):
@@ -99,6 +110,33 @@ class VolumeWidget(BaseWidget):
 
     def _toggle_volume_menu(self):
         self.show_volume_menu()
+
+    def _toggle_inline_slider(self) -> None:
+        if self._inline_slider is None:
+            logging.warning("toggle_inline_slider needs 'inline_slider: {enabled: true}' in the volume widget options")
+            return
+        if self._inline_slider.is_expanded:
+            self._inline_slider.collapse()
+        elif self.volume is not None:
+            self._sync_inline_slider()
+            self._inline_slider.expand()
+
+    def _sync_inline_slider(self) -> None:
+        """Show the current level on the inline slider; setting it there never writes it back."""
+        if self._inline_slider is None or self.volume is None:
+            return
+        try:
+            self._inline_slider.set_level(round(self.volume.GetMasterVolumeLevelScalar() * 100))
+        except Exception as e:
+            logging.debug("Failed to sync the inline volume slider: %s", e)
+
+    def _on_inline_slider_changed(self, value: int) -> None:
+        if self.volume is None:
+            return
+        try:
+            self._set_master_volume(value)
+        except Exception as e:
+            logging.error("Failed to set volume: %s", e)
 
     def _on_slider_released(self):
         # Hide tooltip when slider is released
@@ -139,15 +177,21 @@ class VolumeWidget(BaseWidget):
         tooltip.setWindowOpacity(1.0)
         tooltip.show()
 
+    def _set_master_volume(self, value: int) -> None:
+        """Set the master volume from a 0-100 slider value; 0 mutes and anything above unmutes."""
+        if self.volume is None:
+            return
+        self.volume.SetMasterVolumeLevelScalar(value / 100, None)
+        if (self.volume.GetMute() != 0) != (value == 0):
+            self.toggle_mute()
+
     def _on_slider_value_changed(self, value: int) -> None:
         if self.volume is not None:
             try:
-                self.volume.SetMasterVolumeLevelScalar(value / 100, None)
+                self._set_master_volume(value)
                 # Show tooltip while actively dragging
                 if self.volume_slider is not None:
                     self._show_slider_tooltip(self.volume_slider, value)
-                if (self.volume.GetMute() != 0) != (value == 0):
-                    self.toggle_mute()
             except Exception as e:
                 logging.error("Failed to set volume: %s", e)
 
@@ -593,6 +637,8 @@ class VolumeWidget(BaseWidget):
             numeric_value = int(match.group()) if match else 0
             self.progress_widget.set_value(numeric_value)
 
+        self._sync_inline_slider()
+
         for part in label_parts:
             part = part.strip()
             if part:
@@ -696,6 +742,8 @@ class VolumeWidget(BaseWidget):
         if self.volume is None or a0 is None:
             return
         delta = -a0.angleDelta().y() if self.config.invert_wheel else a0.angleDelta().y()
+        if self._inline_slider is not None:
+            self._inline_slider.postpone_close()
         if delta > 0:
             self._increase_volume()
         elif delta < 0:
