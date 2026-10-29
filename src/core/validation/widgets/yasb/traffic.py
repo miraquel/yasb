@@ -1,5 +1,7 @@
 from typing import Literal
 
+from pydantic import Field
+
 from core.validation.widgets.base_model import (
     CallbacksConfig,
     CustomBaseModel,
@@ -25,6 +27,18 @@ class TrafficMenuConfig(CustomBaseModel):
     show_internet_info: bool = True
 
 
+class TrafficSparklineConfig(CustomBaseModel):
+    enabled: bool = False
+    bars: int = Field(default=12, ge=1, le=200)
+    bar_width: int = Field(default=2, ge=1, le=32)
+    # 0 is allowed: bars that touch.
+    bar_gap: int = Field(default=1, ge=0, le=32)
+    # At least 3 so both directions keep a row of their own next to the baseline.
+    height: int = Field(default=16, ge=3, le=128)
+    # Bytes/s; the smallest speed that fills a bar, so a quiet line never draws full height.
+    scale_floor: int = Field(default=65536, ge=1)
+
+
 class TrafficCallbacksConfig(CallbacksConfig):
     on_left: str = "toggle_label"
     on_middle: str = "do_nothing"
@@ -44,5 +58,6 @@ class TrafficWidgetConfig(CustomBaseModel):
     hide_decimal: bool = False
     speed_threshold: SpeedThresholdConfig = SpeedThresholdConfig()
     menu: TrafficMenuConfig = TrafficMenuConfig()
+    sparkline: TrafficSparklineConfig = TrafficSparklineConfig()
     keybindings: list[KeybindingConfig] = []
     callbacks: TrafficCallbacksConfig = TrafficCallbacksConfig()

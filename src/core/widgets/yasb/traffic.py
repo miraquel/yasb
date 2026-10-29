@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayou
 
 from core.utils.tooltip import set_tooltip
 from core.utils.utilities import PopupWidget, refresh_widget_style
+from core.utils.widgets.traffic.sparkline import SparklineModel
+from core.utils.widgets.traffic.sparkline_view import TrafficSparkline
 from core.validation.widgets.yasb.traffic import TrafficCallbacksConfig, TrafficWidgetConfig
 from core.widgets.base import BaseWidget
 from core.widgets.services.traffic.connection_monitor import InternetChecker
@@ -45,11 +47,32 @@ class TrafficWidget(BaseWidget):
             self.config.label_alt,
         )
 
+        self._sparkline: TrafficSparkline | None = None
+        if self.config.sparkline.enabled:
+            self._init_sparkline()
+
         self._initialize_instance_counters()
         self._setup_callbacks_and_timers(self.config.update_interval, self.config.callbacks)
 
         # Initial data update
         QTimer.singleShot(200, lambda: TrafficWidget._update_interface_data(self.config.interface))
+
+    def _init_sparkline(self):
+        """Put the bar graph right after the primary label's widgets; it belongs to ``label``."""
+        spark = self.config.sparkline
+        model = SparklineModel(
+            bars=spark.bars,
+            bar_width=spark.bar_width,
+            bar_gap=spark.bar_gap,
+            height=spark.height,
+            scale_floor=spark.scale_floor,
+            download_threshold=self.config.speed_threshold.min_download,
+            upload_threshold=self.config.speed_threshold.min_upload,
+        )
+        self._sparkline = TrafficSparkline(model)
+        index = self._widget_container_layout.indexOf(self._widgets[-1]) + 1 if self._widgets else 0
+        self._widget_container_layout.insertWidget(index, self._sparkline)
+        self._sparkline.setVisible(not self._show_alt_label)
 
     def _setup_callbacks_and_timers(self, update_interval: int, callbacks: TrafficCallbacksConfig):
         """Setup callbacks, timers, and internet checker"""
@@ -173,6 +196,12 @@ class TrafficWidget(BaseWidget):
                 "download_speed": "0 Kbps",
                 "raw_upload_speed": "0",
                 "raw_download_speed": "0",
+                "upload_compact_value": "  0",
+                "upload_compact_unit": "K",
+                "download_compact_value": "  0",
+                "download_compact_unit": "K",
+                "upload_bytes_per_sec": 0.0,
+                "download_bytes_per_sec": 0.0,
                 "today_uploaded": "< 1 MB",
                 "today_downloaded": "< 1 MB",
                 "session_uploaded": "< 1 MB",
@@ -182,8 +211,12 @@ class TrafficWidget(BaseWidget):
                 "alltime_downloaded": "< 1 MB",
             }
 
-    def _update_from_shared_data(self, shared_data: NetworkData | None):
-        """Update this instance from shared data"""
+    def _update_from_shared_data(self, shared_data: NetworkData | None, new_sample: bool = True):
+        """Update this instance from shared data.
+
+        ``new_sample`` is False when the same data is only being redrawn (a label toggle), so the
+        sparkline gets exactly one sample per measurement.
+        """
         if shared_data is None:
             return
 
@@ -192,6 +225,9 @@ class TrafficWidget(BaseWidget):
         if current_io is not None:
             self.bytes_sent = current_io.bytes_sent
             self.bytes_recv = current_io.bytes_recv
+
+        if new_sample and self._sparkline is not None:
+            self._sparkline.push(shared_data["download_bytes_per_sec"], shared_data["upload_bytes_per_sec"])
 
         # Update label
         self._update_label_with_data(shared_data)
@@ -223,6 +259,10 @@ class TrafficWidget(BaseWidget):
         label_options = [
             ("{upload_speed}", shared_data["upload_speed"]),
             ("{download_speed}", shared_data["download_speed"]),
+            ("{upload_compact_value}", shared_data["upload_compact_value"]),
+            ("{upload_compact_unit}", shared_data["upload_compact_unit"]),
+            ("{download_compact_value}", shared_data["download_compact_value"]),
+            ("{download_compact_unit}", shared_data["download_compact_unit"]),
             ("{today_uploaded}", shared_data["today_uploaded"]),
             ("{today_downloaded}", shared_data["today_downloaded"]),
             ("{session_uploaded}", shared_data["session_uploaded"]),
@@ -298,9 +338,11 @@ class TrafficWidget(BaseWidget):
             widget.setVisible(not self._show_alt_label)
         for widget in self._widgets_alt:
             widget.setVisible(self._show_alt_label)
+        if self._sparkline is not None:
+            self._sparkline.setVisible(not self._show_alt_label)
         # Force update with current shared data
         if self.config.interface in TrafficWidget._shared_data:
-            self._update_from_shared_data(TrafficWidget._shared_data[self.config.interface])
+            self._update_from_shared_data(TrafficWidget._shared_data[self.config.interface], new_sample=False)
 
     def _update_label(self):
         """Update label - now just triggers shared data update"""
