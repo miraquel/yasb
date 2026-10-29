@@ -89,6 +89,7 @@ progress_bar:
   position: "left"
   animation: true
   level_colors: null
+  full_size: false
 ```
 
 ## Example Configuration
@@ -161,6 +162,7 @@ memory:
   - **background_color**: The background color of the progress bar.
   - **animation**: Whether to enable smooth change of the progress bar value.
   - **level_colors**: Optional colours keyed by the `memory_thresholds` level: `low`, `medium`, `high`, `critical`. When set, the whole ring (or bar) is painted in the current level's colour instead of `color`, so the level reads at a glance rather than only at the tip of a gradient. A level left out keeps `color`. Unset by default, which keeps `color` as before.
+  - **full_size**: Circular only. Draw the ring out to the edge of its `size` box. By default the stroke is inset by a pixel more than half its thickness, so a `size: 16` ring with `thickness: 3` is 13px across with its edges on half pixels; with `full_size: true` it is 16px across and its edges are crisp. Default `false`.
 
 The `label` and `label_alt` options use format strings that can include placeholders for memory metrics. These placeholders will be replaced with actual values when the widget is rendered. You can use `{virtual_mem_free}`, `{virtual_mem_percent}`, `{virtual_mem_total}`, `{virtual_mem_avail}`, `{virtual_mem_used}`, `{virtual_mem_outof}`, `{swap_mem_free}`, `{swap_mem_percent}`, `{swap_mem_total}`
 

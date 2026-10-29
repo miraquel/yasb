@@ -36,6 +36,9 @@ class MemoryProgressBarConfig(CustomBaseModel):
     # Paint the whole ring in the colour of the current memory_thresholds level instead of
     # `color`, whose gradient only shows the level at the arc's tip. Unset keeps `color`.
     level_colors: MemoryLevelColorsConfig | None = None
+    # Circular only: draw the ring out to the edge of its `size` box instead of inset by an
+    # extra pixel (a 16px ring with thickness 3 is then 16px across, not 13).
+    full_size: bool = False
 
 
 class CallbacksMemoryConfig(CallbacksConfig):

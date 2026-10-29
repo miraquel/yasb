@@ -194,6 +194,7 @@ def build_progress_widget(parent: QWidget, options: dict[str, Any]) -> ProgressW
         animation=options["animation"],
         progress_type=options.get("progress_type", "circular"),
         radius=options.get("radius", 0),
+        full_size=options.get("full_size", False),
     )
     return ProgressWidget(progress_bar)
 

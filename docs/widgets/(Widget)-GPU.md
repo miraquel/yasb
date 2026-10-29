@@ -94,6 +94,7 @@ progress_bar:
   position: "left"
   animation: true
   level_colors: null
+  full_size: false
 ```
 
 ## Example Configuration
@@ -155,6 +156,7 @@ gpu:
   - **background_color**: The background color of the progress bar.
   - **animation**: Whether to enable smooth change of the progress bar value.
   - **level_colors**: Optional colours keyed by the `gpu_thresholds` level: `low`, `medium`, `high`, `critical`. When set, the whole ring (or bar) is painted in the current level's colour instead of `color`, so the level reads at a glance rather than only at the tip of a gradient. A level left out keeps `color`. Unset by default, which keeps `color` as before.
+  - **full_size**: Circular only. Draw the ring out to the edge of its `size` box. By default the stroke is inset by a pixel more than half its thickness, so a `size: 16` ring with `thickness: 3` is 13px across with its edges on half pixels; with `full_size: true` it is 16px across and its edges are crisp. Default `false`.
 - **menu**: Configuration for the popup menu that displays a usage graph and detailed GPU statistics. It includes:
   - **enabled**: Whether the popup menu is enabled. Default: `false`.
   - **blur**: Whether to apply a blur effect to the popup background. Default: `true`.
