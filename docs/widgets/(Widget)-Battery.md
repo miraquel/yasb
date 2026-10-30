@@ -7,6 +7,7 @@ Helps you keep an eye on your battery's charge level, remaining life, health, an
 | `label`                 | string  | `{icon}`                                     | The primary label format.                                                   |
 | `label_alt`             | string  | `{percent}% \| remaining: {time_remaining}` | The alternative label format.                                               |
 | `class_name`            | string  | `""`                                         | Additional CSS class name for the widget.                                    |
+| `tooltip`               | boolean | `False`                                      | Whether to show the percent and charging state on hover, for example `Battery 59%, charging`. |
 | `update_interval`       | integer | `5000`                                       | The interval in milliseconds to update the widget (0–60000).                |
 | `time_remaining_natural`| boolean | `False`                                      | Whether to display the remaining time in a natural format.                  |
 | `time_remaining_unlimited_icon`| string | `unlimited`                                      | Which string to use to display unlimited time remaining.                  |
@@ -179,6 +180,7 @@ battery:
   - **color**: The color of the progress bar. Color can be a single color or a gradient. For example, `color: "#57948a"` or `color: ["#57948a", "#ff0000"]` for a gradient.
   - **background_color**: The background color of the progress bar.
   - **animation**: Whether to enable smooth change of the progress bar value.
+  - **level_colors**: Paints the whole bar in the colour of the current level instead of `color`. Keys are the `status_thresholds` levels, `critical`, `low`, `medium`, `high` and `full`, plus `charging`, used while the battery charges. These are the same levels the icon gets as its `status-*` class, so plugged in but not charging keeps the level's colour. A level left out, or no `level_colors` at all, keeps `color`.
 
 ## Style
 ```css

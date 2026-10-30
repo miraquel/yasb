@@ -118,9 +118,16 @@ class MicrophoneWidget(BaseWidget):
                     0 if self.config.progress_bar.position == "left" else self._widget_container_layout.count(),
                     self.progress_widget,
                 )
-            match = re.search(r"\d+", min_level)
-            numeric_value = int(match.group()) if match else 0
-            self.progress_widget.set_value(numeric_value)
+            muted_color = self.config.progress_bar.muted_color
+            if mute_status == 1 and muted_color:
+                # Muted keeps its level in muted_color, so the level to come back to stays in sight
+                self.progress_widget.set_value(mic_level)
+                self.progress_widget.set_color(muted_color)
+            else:
+                match = re.search(r"\d+", min_level)
+                numeric_value = int(match.group()) if match else 0
+                self.progress_widget.set_value(numeric_value)
+                self.progress_widget.set_color(self.config.progress_bar.color)
 
         for part in label_parts:
             part = part.strip()

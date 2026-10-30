@@ -9,6 +9,17 @@ from core.validation.widgets.base_model import (
 )
 
 
+class BatteryLevelColorsConfig(CustomBaseModel):
+    # One bar colour per status_thresholds level, plus one while charging. A level left out keeps
+    # progress_bar.color.
+    critical: str | None = None
+    low: str | None = None
+    medium: str | None = None
+    high: str | None = None
+    full: str | None = None
+    charging: str | None = None
+
+
 class BatteryProgressBarConfig(CustomBaseModel):
     enabled: bool = False
     progress_type: Literal["circular", "linear_horizontal", "linear_vertical"] = "circular"
@@ -19,6 +30,9 @@ class BatteryProgressBarConfig(CustomBaseModel):
     background_color: str = "#3C3C3C"
     position: Literal["left", "right"] = "left"
     animation: bool = True
+    # Paint the bar in the colour of the current level (the same one as the icon's status-*
+    # class) instead of `color`. Unset keeps `color`.
+    level_colors: BatteryLevelColorsConfig | None = None
 
 
 class ChargingOptionsConfig(CustomBaseModel):
@@ -52,6 +66,7 @@ class BatteryConfig(CustomBaseModel):
     label: str = "{icon}"
     label_alt: str = "{percent}% | remaining: {time_remaining}"
     class_name: str = ""
+    tooltip: bool = False
     update_interval: int = Field(default=5000, ge=0, le=60000)
     time_remaining_natural: bool = False
     time_remaining_unlimited_icon: str = "unlimited"

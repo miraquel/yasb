@@ -60,6 +60,10 @@ class InlineVolumeSlider(QFrame):
 
     level_changed = pyqtSignal(int)
     released = pyqtSignal()
+    # Around the slide, so the widget can step its other parts aside: `opening` as it starts to
+    # slide out, `closed` once it has slid back in and is hidden
+    opening = pyqtSignal()
+    closed = pyqtSignal()
 
     def __init__(self, config: VolumeInlineSliderConfig, step: int):
         super().__init__()
@@ -116,6 +120,7 @@ class InlineVolumeSlider(QFrame):
         if self._expanded:
             return
         self._expanded = True
+        self.opening.emit()
         self._slide(self._current_width(), self.target_width())
         self.postpone_close()
 
@@ -165,6 +170,7 @@ class InlineVolumeSlider(QFrame):
         else:
             self.hide()
             self._hovered = False
+            self.closed.emit()
 
     def _reserve_value_width(self) -> None:
         """Size the value label for "100", so the bar doesn't shift as the level gains a digit."""

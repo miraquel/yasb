@@ -180,6 +180,9 @@ volume:
   - **color**: The color of the progress bar. Color can be a single color or a gradient. For example, `color: "#57948a"` or `color: ["#57948a", "#ff0000"]` for a gradient.
   - **background_color**: The background color of the progress bar.
   - **animation**: Whether to enable smooth change of the progress bar value.
+  - **muted_color**: When set, a muted bar keeps its level and is painted in this colour, so the level you come back to stays in sight. Unset (default), a muted bar drops to empty.
+
+  With `inline_slider` on, the progress bar hides while the slider is out, since the slider shows the level, and comes back once it has slid in.
 
 ## Available Styles
 ```css

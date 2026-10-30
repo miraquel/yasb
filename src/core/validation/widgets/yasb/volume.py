@@ -40,6 +40,8 @@ class VolumeProgressBarConfig(CustomBaseModel):
     background_color: str = "#3C3C3C"
     position: str = "left"
     animation: bool = True
+    # Keep the level on a muted bar, painted in this colour. Unset, a muted bar drops to empty.
+    muted_color: str | None = None
 
 
 class VolumeInlineSliderConfig(CustomBaseModel):

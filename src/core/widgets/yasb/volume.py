@@ -60,6 +60,8 @@ class VolumeWidget(BaseWidget):
             self._inline_slider = InlineVolumeSlider(self.config.inline_slider, self.config.scroll_step)
             self._inline_slider.level_changed.connect(self._on_inline_slider_changed)
             self._inline_slider.released.connect(self._on_slider_released)
+            self._inline_slider.opening.connect(self._on_inline_slider_opening)
+            self._inline_slider.closed.connect(self._on_inline_slider_closed)
             self._widget_container_layout.addWidget(self._inline_slider)
 
         self.register_callback("toggle_label", self._toggle_label)
@@ -129,6 +131,16 @@ class VolumeWidget(BaseWidget):
             self._inline_slider.set_level(round(self.volume.GetMasterVolumeLevelScalar() * 100))
         except Exception as e:
             logging.debug("Failed to sync the inline volume slider: %s", e)
+
+    def _on_inline_slider_opening(self) -> None:
+        # The slider shows the level while it is out, so the progress bar steps aside
+        if self.progress_widget is not None:
+            self.progress_widget.hide()
+
+    def _on_inline_slider_closed(self) -> None:
+        # Only once it is in the layout: shown before that, it would open as a window of its own
+        if self.progress_widget is not None and self._widget_container_layout.indexOf(self.progress_widget) != -1:
+            self.progress_widget.show()
 
     def _on_inline_slider_changed(self, value: int) -> None:
         if self.volume is None:
@@ -615,11 +627,8 @@ class VolumeWidget(BaseWidget):
             try:
                 mute_status = self.volume.GetMute()
                 icon_volume = self._get_volume_icon()
-                level_volume = (
-                    self.config.mute_text
-                    if mute_status == 1
-                    else f"{round(self.volume.GetMasterVolumeLevelScalar() * 100)}%"
-                )
+                volume_level = round(self.volume.GetMasterVolumeLevelScalar() * 100)
+                level_volume = self.config.mute_text if mute_status == 1 else f"{volume_level}%"
 
             except Exception as e:
                 logging.error("Failed to get volume info: %s", e)
@@ -633,9 +642,16 @@ class VolumeWidget(BaseWidget):
                     0 if self.config.progress_bar.position == "left" else self._widget_container_layout.count(),
                     self.progress_widget,
                 )
-            match = re.search(r"\d+", level_volume)
-            numeric_value = int(match.group()) if match else 0
-            self.progress_widget.set_value(numeric_value)
+            muted_color = self.config.progress_bar.muted_color
+            if mute_status == 1 and muted_color:
+                # Muted keeps its level in muted_color, so the level to come back to stays in sight
+                self.progress_widget.set_value(volume_level)
+                self.progress_widget.set_color(muted_color)
+            else:
+                match = re.search(r"\d+", level_volume)
+                numeric_value = int(match.group()) if match else 0
+                self.progress_widget.set_value(numeric_value)
+                self.progress_widget.set_color(self.config.progress_bar.color)
 
         self._sync_inline_slider()
 
