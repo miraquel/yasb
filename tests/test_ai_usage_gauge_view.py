@@ -108,6 +108,29 @@ class ShapeAndStyleTest(unittest.TestCase):
         self.assertGreater(img.pixelColor(0, 10).alpha(), 0)
         self.assertGreater(img.pixelColor(99, 0).alpha(), 0)
 
+    def test_small_line_clears_the_rounded_corner(self):
+        # A 3% week on the Claude half: measured from x=0 the whole line sat inside the corner's curve.
+        g = make()
+        g.setStyleSheet("qproperty-leftradius: 8; qproperty-rightradius: 0;")
+        g.set_reading(None, None, 3, "high")
+        img = paint(g)
+        self.assertTrue(near(img.pixelColor(9, 19), RED, 255), img.pixelColor(9, 19).getRgb())
+        self.assertTrue(near(img.pixelColor(9, 18), RED, 255))
+        self.assertEqual(img.pixelColor(13, 19).alpha(), 0)  # 8 + 3% of the 92px past the curve ends near 11
+        g.set_reading(None, None, 100, "high")
+        self.assertTrue(near(paint(g).pixelColor(99, 19), RED, 255))  # a full line still reaches the end
+        g.set_reading(None, None, 0, "high")
+        self.assertEqual(paint(g).pixelColor(9, 19).alpha(), 0)  # nothing used, nothing drawn
+
+    def test_line_on_a_square_end_keeps_its_plain_scale(self):
+        # The Codex half starts at the seam, square: its line is measured from x=0 as before.
+        g = make()
+        g.setStyleSheet("qproperty-leftradius: 0; qproperty-rightradius: 8;")
+        g.set_reading(None, None, 30, "low")
+        img = paint(g)
+        self.assertTrue(near(img.pixelColor(28, 19), PEACH, 255))
+        self.assertEqual(img.pixelColor(31, 19).alpha(), 0)
+
     def test_stylesheet_sets_the_look(self):
         g = make()
         g.parentWidget().setStyleSheet(".gauge { qproperty-lowcolor: #94e2d5; qproperty-lowalpha: 50; }")

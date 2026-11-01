@@ -408,7 +408,7 @@ them once, when the widget is polished, so editing them needs a full restart:
 | `lowalpha` / `mediumalpha` / `highalpha` | `20` / `24` / `30` | Fill opacity per step, in percent |
 | `edgealpha` | `45` | Opacity of the 1px edge line where the fill ends |
 | `lineheight` | `2` | Height of the bottom line, in px; it is drawn opaque |
-| `leftradius` / `rightradius` | `8` / `8` | Corner radii the fill and the line are clipped to |
+| `leftradius` / `rightradius` | `8` / `8` | Corner radii the fill and the line are clipped to. The line's share is measured from where the left curve ends, so a small share still shows past it |
 
 ```css
 .claude-usage .widget-container {

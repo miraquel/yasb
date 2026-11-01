@@ -182,10 +182,13 @@ class UsageGauge(QWidget):
                     self._fill_rect(
                         painter, outline, QRectF(width - 1, 0, 1, h), self._tint(self._fill_step, self._edge_alpha)
                     )
-        if line is not None:
-            width = round(w * line / 100)
+        if line is not None and line > 0:
+            # Measured from where a rounded left end's curve meets the bottom: from x=0 a small
+            # share would sit wholly inside the curve and never show. 100% still reaches the end.
+            start = min(float(self._left_radius), h / 2, w / 2)
+            width = round(start + (w - start) * line / 100)
             height = min(self._line_height, h)
-            if width > 0 and height > 0:
+            if height > 0:
                 self._fill_rect(
                     painter, outline, QRectF(0, h - height, width, height), QColor(self._hue(self._line_step))
                 )
