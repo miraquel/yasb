@@ -30,6 +30,8 @@ from core.utils.utilities import (
     build_progress_widget,
     refresh_widget_style,
 )
+from core.utils.widgets.ai_usage.gauge import GaugeReading, GaugeWindow, pick, share, step
+from core.utils.widgets.ai_usage.gauge_view import UsageGauge
 from core.utils.widgets.ai_usage.hearts import heart_halves
 from core.utils.widgets.ai_usage.scene import HeartsView, SkyScene
 from core.utils.widgets.ai_usage.sky import apply_sky_settings
@@ -50,6 +52,7 @@ from core.widgets.services.codex_usage.sessions import (
 _SESSION_STATES = (STATUS_WORKING, STATUS_WAITING, STATUS_IDLE)
 # The ring's level_colors keys (the Claude widget's names) for this widget's level classes.
 _LEVEL_COLOR_KEYS = {"good": "low", "low": "medium", "critical": "high"}
+_LEVEL_CLASSES = ("good", "low", "critical", "unknown")
 
 
 def level_class(used: Any, warn: float, crit: float) -> str:
@@ -293,6 +296,11 @@ class CodexUsageWidget(BaseWidget):
         if self.progress_widget:
             position = 0 if self.config.progress_bar.position == "left" else self._widget_container_layout.count()
             self._widget_container_layout.insertWidget(position, self.progress_widget)
+        # The fill behind the pill (optional), beneath the container so its labels and the seam
+        # paint over it.
+        self._gauge: UsageGauge | None = None
+        if self.config.gauge.enabled:
+            self._gauge = UsageGauge(self._widget_frame, self._widget_container, self.config.gauge.animation)
 
         self.register_callback("toggle_label", self._toggle_label)
         self.register_callback("toggle_menu", self._toggle_menu)
@@ -527,7 +535,13 @@ class CodexUsageWidget(BaseWidget):
     def _format_values(self) -> dict[str, str]:
         primary = self._window("primary")
         secondary = self._window("secondary")
+        windows = self._gauge_windows()
+        reading = self._gauge_reading(windows)
+        fill_window = next((window for gauge_window, window in windows if gauge_window is reading.fill), {})
         return {
+            # The window the fill shows, and its name while that is the longer of two (see _gauge_reading).
+            "gauge_value": self._mode_value(fill_window),
+            "gauge_window": reading.prefix,
             "primary_remaining": self._percent(primary.get("remaining")),
             "secondary_remaining": self._percent(secondary.get("remaining")),
             "primary_used": self._percent(primary.get("used")),
@@ -614,6 +628,7 @@ class CodexUsageWidget(BaseWidget):
         template = self.config.label_alt if self._show_alt_label else self.config.label
         values = self._format_values()
         parts = [part for part in re.split(r"(<span.*?>.*?</span>)", template) if part.strip()]
+        gauge_fill = self._gauge_reading().fill
 
         for index, part in enumerate(parts):
             if index >= len(active_widgets):
@@ -631,6 +646,15 @@ class CodexUsageWidget(BaseWidget):
                 base = widget.property("class") or "sessions"
                 base = " ".join(t for t in base.split() if t not in _SESSION_STATES)
                 widget.setProperty("class", f"{base} {self._session_state()}")
+            if "{gauge_" in part:
+                # The level of the window the fill shows, in this widget's own names (good / low /
+                # critical), so the number escalates with the fill.
+                base = widget.property("class") or "label"
+                base = " ".join(t for t in base.split() if t not in _LEVEL_CLASSES)
+                used = gauge_fill.used if gauge_fill else None
+                widget.setProperty(
+                    "class", f"{base} {level_class(used, self.config.warn_percent, self.config.crit_percent)}"
+                )
 
         active_window = self._active_window()
         if self.progress_widget:
@@ -668,6 +692,44 @@ class CodexUsageWidget(BaseWidget):
                 lines.append(f"Cached - {reason}" if reason else "Cached")
             set_tooltip(self, "\n".join(lines))
         refresh_widget_style(*active_widgets)
+        self._sync_gauge()
+
+    def _gauge_windows(self) -> list[tuple[GaugeWindow, dict[str, Any]]]:
+        """The windows the gauge can show, shortest first, each with the dict it came from.
+
+        A plan reports one or two; with two, primary counts as the short one unless both durations
+        are known and say otherwise.
+        """
+        present = [(name, self._window(name)) for name in ("primary", "secondary") if self._window(name)]
+        if len(present) == 2:
+            minutes = [window.get("duration_mins") for _, window in present]
+            if all(isinstance(m, (int, float)) and m > 0 for m in minutes) and minutes[1] < minutes[0]:
+                present.reverse()
+        return [
+            (GaugeWindow(self._duration_name(window.get("duration_mins"), name), window.get("used")), window)
+            for name, window in present
+        ]
+
+    def _gauge_reading(self, windows: list[tuple[GaugeWindow, dict[str, Any]]] | None = None) -> GaugeReading:
+        """Which window the fill and the number show: the short one until the long one reaches
+        crit_percent, the other one while the right-click label is up, the only one if just one."""
+        gauge_windows = [gauge_window for gauge_window, _ in (self._gauge_windows() if windows is None else windows)]
+        short = gauge_windows[0] if gauge_windows else None
+        long = gauge_windows[1] if len(gauge_windows) > 1 else None
+        return pick(short, long, self.config.crit_percent, self._show_alt_label)
+
+    def _sync_gauge(self) -> None:
+        """Hand the gauge its shares, which follow usage_mode, and its steps, which always come from
+        consumption, so red means close to the limit whichever way the fill runs."""
+        if self._gauge is None:
+            return
+        reading = self._gauge_reading()
+        fill = reading.fill.used if reading.fill else None
+        line = reading.line.used if reading.line else None
+        warn, crit = self.config.warn_percent, self.config.crit_percent
+        self._gauge.set_reading(
+            share(fill, self._usage_mode), step(fill, warn, crit), share(line, self._usage_mode), step(line, warn, crit)
+        )
 
     def _toggle_menu(self) -> None:
         if is_valid_qobject(self._menu) and self._menu.isVisible():

@@ -23,7 +23,9 @@ from PyQt6.QtWidgets import QApplication, QLabel  # noqa: E402
 APP = QApplication.instance() or QApplication([])
 
 from core.validation.widgets.yasb.claude_usage import ClaudeUsageConfig  # noqa: E402
+from core.validation.widgets.yasb.codex_usage import CodexUsageConfig  # noqa: E402
 from core.widgets.yasb import claude_usage as claude_module  # noqa: E402
+from core.widgets.yasb import codex_usage as codex_module  # noqa: E402
 
 LABEL = "<span class='window'>{gauge_window}</span>{gauge_value}%"
 LABEL_ALT = "<span class='window'>{gauge_window}</span>{gauge_value}% {mode}"
@@ -63,6 +65,25 @@ def claude(data: dict[str, Any], **opts):
     options.update(opts)
     with patch.object(claude_module.ClaudeUsageService, "get_instance", return_value=FakeService(data)):
         return claude_module.ClaudeUsageWidget(ClaudeUsageConfig(**options))
+
+
+def codex(data: dict[str, Any], **opts):
+    options: dict[str, Any] = {
+        "show_account": False,
+        "warn_percent": 60,
+        "crit_percent": 85,
+        "usage_mode": "used",
+        "label": LABEL,
+        "label_alt": LABEL_ALT,
+        "gauge": {"enabled": True, "animation": False},
+    }
+    options.update(opts)
+    with patch.object(codex_module.CodexUsageService, "get_instance", return_value=FakeService(data)):
+        return codex_module.CodexUsageWidget(CodexUsageConfig(**options))
+
+
+# The only window this plan's Codex account reports: weekly, no secondary.
+WEEK = {"used": 47, "remaining": 53, "duration_mins": 10080, "resets_at": None}
 
 
 class ClaudeGaugeTest(unittest.TestCase):
@@ -120,6 +141,36 @@ class ClaudeGaugeTest(unittest.TestCase):
         w = claude({"five": 23, "seven": 41})
         w._on_data({"five": 66, "seven": 52})
         self.assertEqual(w._gauge.reading(), (66, "medium", 52, "low"))
+
+
+class CodexGaugeTest(unittest.TestCase):
+    def test_codex_gauge_off_by_default(self):
+        self.assertFalse(CodexUsageConfig().gauge.enabled)
+
+    def test_codex_lone_window_drives_and_right_click_keeps_it(self):
+        w = codex({"primary": WEEK, "secondary": None})
+        win, num = w._widgets
+        self.assertEqual((win.isHidden(), num.text()), (True, "47%"))
+        self.assertIn("good", cls(num))
+        self.assertEqual(w._gauge.reading(), (47, "low", None, None))
+        w._toggle_label()
+        win, num = w._widgets_alt
+        self.assertEqual(num.text(), "47% used")
+        self.assertEqual(w._gauge.reading(), (47, "low", None, None))
+
+    def test_codex_pair_takes_over_by_duration(self):
+        five = {"used": 20, "remaining": 80, "duration_mins": 300, "resets_at": None}
+        week = {"used": 90, "remaining": 10, "duration_mins": 10080, "resets_at": None}
+        w = codex({"primary": five, "secondary": week})
+        win, num = w._widgets
+        self.assertEqual((win.text(), num.text()), ("1w", "90%"))
+        self.assertIn("critical", cls(num))
+        self.assertEqual(w._gauge.reading(), (90, "high", 20, "low"))
+
+    def test_codex_number_uses_its_own_level_names(self):
+        w = codex({"primary": dict(WEEK, used=70, remaining=30), "secondary": None})
+        self.assertIn("low", cls(w._widgets[1]))
+        self.assertEqual(w._gauge.reading()[1], "medium")
 
 
 if __name__ == "__main__":
