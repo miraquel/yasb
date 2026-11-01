@@ -1,0 +1,126 @@
+"""Widget-level tests for the AI pill's fill gauge on the Claude and Codex usage widgets.
+
+Each widget is built with its usage service swapped for a fake that hands over a fixed reading, so
+no network, CLI or bar is involved. What is checked is what the pill shows: the number, its prefix,
+its level class, and the reading handed to the gauge painter.
+"""
+
+import sys
+import unittest
+from pathlib import Path
+from typing import Any
+from unittest.mock import patch
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = PROJECT_ROOT / "src"
+
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from PyQt6.QtCore import QObject, pyqtSignal  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QLabel  # noqa: E402
+
+APP = QApplication.instance() or QApplication([])
+
+from core.validation.widgets.yasb.claude_usage import ClaudeUsageConfig  # noqa: E402
+from core.widgets.yasb import claude_usage as claude_module  # noqa: E402
+
+LABEL = "<span class='window'>{gauge_window}</span>{gauge_value}%"
+LABEL_ALT = "<span class='window'>{gauge_window}</span>{gauge_value}% {mode}"
+
+
+class FakeService(QObject):
+    data_ready = pyqtSignal(dict)
+
+    def __init__(self, data: dict[str, Any]):
+        super().__init__()
+        self._data = data
+
+    def latest(self) -> dict[str, Any]:
+        return dict(self._data)
+
+    def release(self) -> None:
+        pass
+
+    def refresh_now(self) -> None:
+        pass
+
+
+def cls(label: QLabel) -> set[str]:
+    return set((label.property("class") or "").split())
+
+
+def claude(data: dict[str, Any], **opts):
+    options: dict[str, Any] = {
+        "show_account": False,
+        "warn_percent": 60,
+        "crit_percent": 85,
+        "usage_mode": "used",
+        "label": LABEL,
+        "label_alt": LABEL_ALT,
+        "gauge": {"enabled": True, "animation": False},
+    }
+    options.update(opts)
+    with patch.object(claude_module.ClaudeUsageService, "get_instance", return_value=FakeService(data)):
+        return claude_module.ClaudeUsageWidget(ClaudeUsageConfig(**options))
+
+
+class ClaudeGaugeTest(unittest.TestCase):
+    def test_gauge_off_by_default(self):
+        self.assertFalse(ClaudeUsageConfig().gauge.enabled)
+        self.assertIsNone(claude({"five": 23, "seven": 41}, gauge={"enabled": False})._gauge)
+
+    def test_short_window_drives(self):
+        w = claude({"five": 23, "seven": 41})
+        win, num = w._widgets
+        self.assertEqual((win.isHidden(), num.text()), (True, "23%"))
+        self.assertTrue(cls(num) >= {"label", "low"}, cls(num))
+        self.assertEqual(w._gauge.reading(), (23, "low", 41, "low"))
+
+    def test_week_takes_over_with_prefix_and_red(self):
+        w = claude({"five": 15, "seven": 97})
+        win, num = w._widgets
+        self.assertEqual((win.text(), num.text()), ("7d", "97%"))
+        self.assertIn("high", cls(num))
+        self.assertEqual(w._gauge.reading(), (97, "high", 15, "low"))
+
+    def test_model_caps_never_take_over(self):
+        w = claude({"five": 20, "seven": 40, "scoped": [{"name": "Fable", "value": 97}]})
+        self.assertEqual(w._widgets[1].text(), "20%")
+        self.assertEqual(w._gauge.reading()[0], 20)
+
+    def test_right_click_shows_the_other_window(self):
+        w = claude({"five": 23, "seven": 41})
+        w._toggle_label()
+        win, num = w._widgets_alt
+        self.assertEqual((win.text(), num.text()), ("7d", "41% used"))
+        self.assertEqual(w._gauge.reading(), (41, "low", 23, "low"))
+
+    def test_left_mode_drains_but_keeps_consumption_colour(self):
+        w = claude({"five": 15, "seven": 97})
+        w._toggle_usage_mode()
+        win, num = w._widgets
+        self.assertEqual((win.text(), num.text()), ("7d", "3%"))
+        self.assertIn("high", cls(num))
+        self.assertEqual(w._gauge.reading(), (3, "high", 85, "low"))
+
+    def test_no_reading_is_not_zero(self):
+        w = claude({})
+        num = w._widgets[1]
+        self.assertEqual(num.text(), "--%")
+        self.assertIn("unknown", cls(num))
+        self.assertEqual(w._gauge.reading(), (None, None, None, None))
+
+    def test_over_100_fills_but_keeps_the_number(self):
+        w = claude({"five": 104, "seven": 50})
+        self.assertEqual(w._widgets[1].text(), "104%")
+        self.assertEqual(w._gauge.reading()[:2], (100, "high"))
+
+    def test_new_data_updates_the_gauge(self):
+        w = claude({"five": 23, "seven": 41})
+        w._on_data({"five": 66, "seven": 52})
+        self.assertEqual(w._gauge.reading(), (66, "medium", 52, "low"))
+
+
+if __name__ == "__main__":
+    unittest.main()
