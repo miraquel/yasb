@@ -84,6 +84,8 @@ def codex(data: dict[str, Any], **opts):
 
 # The only window this plan's Codex account reports: weekly, no secondary.
 WEEK = {"used": 47, "remaining": 53, "duration_mins": 10080, "resets_at": None}
+# Reset times on either side of now, for readings that have and have not outlived their window.
+PAST, FUTURE = "2020-01-01T00:00:00Z", "2099-01-01T00:00:00Z"
 
 
 class ClaudeGaugeTest(unittest.TestCase):
@@ -137,6 +139,14 @@ class ClaudeGaugeTest(unittest.TestCase):
         self.assertEqual(w._widgets[1].text(), "104%")
         self.assertEqual(w._gauge.reading()[:2], (100, "high"))
 
+    def test_window_past_its_reset_is_not_a_reading(self):
+        # An expired token serves the cached record: its 5 hours reset long ago, its week has not.
+        w = claude({"five": 90, "five_reset_iso": PAST, "seven": 40, "seven_reset_iso": FUTURE, "token_expired": True})
+        num = w._widgets[1]
+        self.assertEqual(num.text(), "--%")
+        self.assertIn("unknown", cls(num))
+        self.assertEqual(w._gauge.reading(), (None, None, 40, "low"))
+
     def test_new_data_updates_the_gauge(self):
         w = claude({"five": 23, "seven": 41})
         w._on_data({"five": 66, "seven": 52})
@@ -166,6 +176,16 @@ class CodexGaugeTest(unittest.TestCase):
         self.assertEqual((win.text(), num.text()), ("1w", "90%"))
         self.assertIn("critical", cls(num))
         self.assertEqual(w._gauge.reading(), (90, "high", 20, "low"))
+
+    def test_codex_window_past_its_reset_is_not_a_reading(self):
+        # A failed refresh serves the cached reading; once its window has reset it says nothing.
+        w = codex(
+            {"primary": dict(WEEK, used=95, remaining=5, resets_at=1_000_000.0), "secondary": None, "stale": True}
+        )
+        num = w._widgets[1]
+        self.assertEqual(num.text(), "--%")
+        self.assertIn("unknown", cls(num))
+        self.assertEqual(w._gauge.reading(), (None, None, None, None))
 
     def test_codex_number_uses_its_own_level_names(self):
         w = codex({"primary": dict(WEEK, used=70, remaining=30), "secondary": None})

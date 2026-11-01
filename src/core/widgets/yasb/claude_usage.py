@@ -757,9 +757,17 @@ class ClaudeUsageWidget(BaseWidget):
         """Which window the fill and the number show: the 5 hours until the week reaches crit_percent,
         the other one while the right-click label is up. Per-model weekly caps stay in the popup:
         hitting one locks out that model, not you."""
+        now = time.time()
+
+        def current(key: str) -> Any:
+            # An expired token serves the cached record; once a window has reset, its old share
+            # says nothing about now and would pass for a live reading, so it counts as none.
+            reset = self._epoch(self._data.get(f"{key}_reset_iso"))
+            return None if reset is not None and reset <= now else self._data.get(key)
+
         return pick(
-            GaugeWindow("5h", self._data.get("five")),
-            GaugeWindow("7d", self._data.get("seven")),
+            GaugeWindow("5h", current("five")),
+            GaugeWindow("7d", current("seven")),
             self.config.crit_percent,
             self._show_alt_label,
         )

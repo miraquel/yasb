@@ -537,7 +537,14 @@ class CodexUsageWidget(BaseWidget):
         secondary = self._window("secondary")
         windows = self._gauge_windows()
         reading = self._gauge_reading(windows)
-        fill_window = next((window for gauge_window, window in windows if gauge_window is reading.fill), {})
+        fill_window = next(
+            (
+                window
+                for gauge_window, window in windows
+                if gauge_window is reading.fill and gauge_window.used is not None
+            ),
+            {},
+        )
         return {
             # The window the fill shows, and its name while that is the longer of two (see _gauge_reading).
             "gauge_value": self._mode_value(fill_window),
@@ -698,15 +705,22 @@ class CodexUsageWidget(BaseWidget):
         """The windows the gauge can show, shortest first, each with the dict it came from.
 
         A plan reports one or two; with two, primary counts as the short one unless both durations
-        are known and say otherwise.
+        are known and say otherwise. A window already past its reset (a failed refresh serves the
+        cached reading) has no reading: its old share would pass for a live one.
         """
         present = [(name, self._window(name)) for name in ("primary", "secondary") if self._window(name)]
         if len(present) == 2:
             minutes = [window.get("duration_mins") for _, window in present]
             if all(isinstance(m, (int, float)) and m > 0 for m in minutes) and minutes[1] < minutes[0]:
                 present.reverse()
+        now = time.time()
+
+        def current(window: dict[str, Any]) -> Any:
+            reset = window.get("resets_at")
+            return None if isinstance(reset, (int, float)) and reset <= now else window.get("used")
+
         return [
-            (GaugeWindow(self._duration_name(window.get("duration_mins"), name), window.get("used")), window)
+            (GaugeWindow(self._duration_name(window.get("duration_mins"), name), current(window)), window)
             for name, window in present
         ]
 

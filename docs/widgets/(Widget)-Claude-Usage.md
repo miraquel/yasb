@@ -383,7 +383,9 @@ popup.
   `low` below `warn_percent`, `medium` from it, `high` from `crit_percent`. In `remaining` mode
   the fill drains instead of filling, but the colour still comes from consumption, so red always
   means close to the limit.
-- **No reading:** no fill and no line, so a missing reading never looks like a healthy 0%.
+- **No reading:** no fill and no line, so a missing reading never looks like a healthy 0%. A cached
+  reading whose window has already reset (an expired token serves the last record) counts as none:
+  `{gauge_value}` reads `--` until a fresh one arrives.
 - **Right-click** (`toggle_label`) swaps the two windows, so the fill always matches the number
   on screen.
 
