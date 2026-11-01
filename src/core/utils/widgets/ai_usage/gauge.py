@@ -39,9 +39,7 @@ def step(used: float | None, warn: float, crit: float) -> Step | None:
     return "low"
 
 
-def pick(
-    short: GaugeWindow | None, long: GaugeWindow | None, crit: float, swapped: bool = False
-) -> GaugeReading:
+def pick(short: GaugeWindow | None, long: GaugeWindow | None, crit: float, swapped: bool = False) -> GaugeReading:
     """Which window takes the fill and which the line.
 
     ``swapped`` is the right-click label: it shows the window that is not driving. A lone window
