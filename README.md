@@ -134,6 +134,7 @@ choco install yasb
 | [Volume](https://github.com/amnweb/yasb/wiki/(Widget)-Volume) | Shows and controls the system volume. |
 | [Wallpapers](https://github.com/amnweb/yasb/wiki/(Widget)-Wallpapers) | Wallpapers manager widget. |
 | [Weather](https://github.com/amnweb/yasb/wiki/(Widget)-Weather) | Displays current weather information. |
+| [Local Weather](https://github.com/amnweb/yasb/wiki/(Widget)-Local-Weather) | Shows whether rain is coming in the next hours, for wherever the laptop is (Windows location). |
 | [WiFi](https://github.com/amnweb/yasb/wiki/(Widget)-WiFi) | Shows the current WiFi status and available networks. |
 | [WHKD](https://github.com/amnweb/yasb/wiki/(Widget)-Whkd) | Shows the current hotkey binding mode of WHKD. |  
 | [Windows-Desktops](https://github.com/amnweb/yasb/wiki/(Widget)-Windows-Desktops) | Windows virtual desktops widget. |
