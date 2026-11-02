@@ -625,12 +625,20 @@ class ToastNotifier:
 class ElidedLabel(QLabel):
     """
     QLabel that automatically elides text with "..." when it doesn't fit,
-    while preserving the original via `text()`.
+    while preserving the original via `text()`. `elide_mode` picks which end
+    is cut (right by default; left keeps the tail of a path visible).
     """
 
-    def __init__(self, text: str = "", parent: QWidget | None = None):
+    def __init__(
+        self,
+        text: str = "",
+        parent: QWidget | None = None,
+        *,
+        elide_mode: Qt.TextElideMode = Qt.TextElideMode.ElideRight,
+    ):
         super().__init__(text, parent)
         self._text = text
+        self.elide_mode = elide_mode
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(0)
 
@@ -650,11 +658,12 @@ class ElidedLabel(QLabel):
 
     def _update_elided_text(self) -> None:
         metrics = QFontMetrics(self.font())
-        # Keep a small margin to avoid edge-clipping and layout loops.
-        available_width = max(self.width() - 4, 0)
+        # Keep a small margin to avoid edge-clipping and layout loops. Measure the content box,
+        # so a CSS margin or padding on the label does not clip the ellipsis.
+        available_width = max(self.contentsRect().width() - 4, 0)
         elided = metrics.elidedText(
             self._text,
-            Qt.TextElideMode.ElideRight,
+            self.elide_mode,
             available_width,
         )
         super().setText(elided)
