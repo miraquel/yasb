@@ -4,9 +4,10 @@ looks the laptop up or calls WeatherAPI."""
 
 import unittest
 
-from local_weather_payloads import at, first_ink, payload, rain
 from pydantic import ValidationError
 from PyQt6.QtWidgets import QApplication, QLabel
+
+from tests.support.local_weather import at, first_ink, payload, rain
 
 APP = QApplication.instance() or QApplication([])
 

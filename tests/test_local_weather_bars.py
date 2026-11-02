@@ -3,19 +3,17 @@ and read back pixel by pixel."""
 
 import unittest
 
-import local_weather_payloads  # noqa: F401  (puts src on sys.path)
 from PyQt6.QtCore import QSize
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication
 
 APP = QApplication.instance() or QApplication([])
 
-from local_weather_payloads import at  # noqa: E402
-
 from core.utils.widgets.ai_usage.scene import SkyScene  # noqa: E402
 from core.utils.widgets.ai_usage.sky import Sky  # noqa: E402
 from core.utils.widgets.local_weather.bars import RainBars, fit_labels  # noqa: E402
 from core.utils.widgets.local_weather.rain import Bar  # noqa: E402
+from tests.support.local_weather import at  # noqa: E402
 
 PILL = [Bar("wet", 13), Bar("dry", 2), Bar("heavy", 13), Bar("none", 2), Bar("wet", 4), Bar("dry", 2)]
 

@@ -3,8 +3,6 @@ the day rows. Fixed Jakarta times, synthetic payloads, no clock."""
 
 import unittest
 
-from local_weather_payloads import JAKARTA, at, forecast, rain
-
 from core.utils.widgets.local_weather.forecast import hours_from
 from core.utils.widgets.local_weather.rain import (
     Bar,
@@ -18,6 +16,7 @@ from core.utils.widgets.local_weather.rain import (
     pill_bar,
     pill_reading,
 )
+from tests.support.local_weather import JAKARTA, at, forecast, rain
 
 T = Thresholds()
 COMING = rain(13, [10, 25, 70, 95, 60, 35, 20, 15, 10, 10, 5, 5])

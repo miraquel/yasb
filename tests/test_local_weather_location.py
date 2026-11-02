@@ -4,8 +4,6 @@ then the config address. Coordinates never reach a log record above DEBUG."""
 import logging
 import unittest
 
-import local_weather_payloads  # noqa: F401  (puts src on sys.path)
-
 from core.utils.widgets.local_weather.location import Fix, LocationTracker, Place
 
 CONFIG = "Example Town"

@@ -5,10 +5,9 @@ import json
 import unittest
 from datetime import date
 
-from local_weather_payloads import FIXTURE, at, forecast, payload, rain
-
 from core.utils.widgets.local_weather.conditions import condition, condition_class, is_raining_now, wmo_code
 from core.utils.widgets.local_weather.forecast import Current, hours_from, parse_forecast
+from tests.support.local_weather import FIXTURE, at, forecast, payload, rain
 
 
 class ParseTests(unittest.TestCase):

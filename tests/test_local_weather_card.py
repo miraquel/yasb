@@ -3,8 +3,9 @@ no forecast, the header line's state and the axis. Filled offscreen; no popup is
 
 import unittest
 
-from local_weather_payloads import at, first_ink, forecast, rain
 from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QWidget
+
+from tests.support.local_weather import at, first_ink, forecast, rain
 
 APP = QApplication.instance() or QApplication([])
 

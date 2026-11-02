@@ -3,11 +3,10 @@ rows and the sky's input, all at fixed Jakarta times."""
 
 import unittest
 
-from local_weather_payloads import at, forecast, rain
-
 from core.utils.widgets.local_weather.location import Place
 from core.utils.widgets.local_weather.rain import Bar, Thresholds
 from core.utils.widgets.local_weather.views import SkyInput, card_view, header_line, pill_view
+from tests.support.local_weather import at, forecast, rain
 
 T = Thresholds()
 CONFIG = "Example Town"

@@ -3,11 +3,11 @@ retry, and not stacking lookups. Nothing here touches the network or Windows loc
 
 import unittest
 
-from local_weather_payloads import payload
 from PyQt6.QtWidgets import QApplication
 
 from core.utils.widgets.local_weather.location import LocationTracker, Place
 from core.widgets.services.local_weather.fetcher import BUSY_TIMEOUT_S, LocalWeatherFetcher, build_url
+from tests.support.local_weather import payload
 
 APP = QApplication.instance() or QApplication([])
 PLACE = Place("-6.18,106.63", "windows", "")

@@ -4,7 +4,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
+SRC_ROOT = Path(__file__).resolve().parents[2] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
@@ -12,7 +12,7 @@ from core.utils.widgets.local_weather.forecast import Forecast, parse_forecast  
 
 JAKARTA = timezone(timedelta(hours=7))
 DAY0 = datetime(2026, 11, 2, tzinfo=JAKARTA)
-FIXTURE = Path(__file__).resolve().parent / "fixtures" / "local_weather" / "forecast_rajeg.json"
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "local_weather" / "forecast_rajeg.json"
 
 
 def at(hour: int, minute: int = 0, day: int = 0) -> datetime:
