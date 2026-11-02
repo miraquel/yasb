@@ -19,12 +19,13 @@ from core.utils.single_instance import single_instance_lock
 from core.utils.system_colors import SystemColorsService
 from core.utils.update_service import get_update_service, start_update_checker
 from core.watcher import create_observer
-from env import load_env, set_font_engine
+from env import apply_font_rendering, load_env, set_font_engine
 
 
 def main():
     """Main entry point"""
     app = YASBApplication(argv)
+    apply_font_rendering(app)
 
     if is_first_run() and not run_setup_wizard():
         return
