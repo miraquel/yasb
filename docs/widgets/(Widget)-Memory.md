@@ -88,6 +88,8 @@ progress_bar:
   background_color: "#3C3C3C"
   position: "left"
   animation: true
+  level_colors: null
+  full_size: false
 ```
 
 ## Example Configuration
@@ -130,7 +132,7 @@ memory:
 - **class_name:** Additional CSS class name for the widget. This allows for custom styling.
 - **update_interval:** The interval in milliseconds to update the memory widget. Must be between 1000 and 60000.
 - **callbacks:** Mouse event callbacks. See [Callbacks](#callbacks).
-- **memory_thresholds:** A dictionary specifying the thresholds for memory usage levels. The keys are `low`, `medium`, and `high`, and the values are the percentage thresholds.
+- **memory_thresholds:** A dictionary specifying the thresholds for memory usage levels. The keys are `low`, `medium`, and `high`, and the values are the percentage thresholds. Each value is the top of its level, inclusive: usage up to `low` is `low`, up to `medium` is `medium`, up to `high` is `high`, and anything above `high` is `critical`. The level is applied as a `status-<level>` class to the text labels and to `.widget-container`.
 - **hide_decimal:** Whether to hide decimal places in the memory widget.
 - **keybindings:** A list of global hotkeys for this widget. See [Keybindings](./Keybindings).
 - **histogram_icons**: A list of icons representing different levels of memory usage in the histogram. Exactly 9 icons are required, representing usage from 0% to 80%+. Can be used by putting `{histogram}` in the label.
@@ -159,9 +161,36 @@ memory:
   - **color**: The color of the progress bar. Color can be a single color or a gradient. For example, `color: "#57948a"` or `color: ["#57948a", "#ff0000"]` for a gradient.
   - **background_color**: The background color of the progress bar.
   - **animation**: Whether to enable smooth change of the progress bar value.
+  - **level_colors**: Optional colours keyed by the `memory_thresholds` level: `low`, `medium`, `high`, `critical`. When set, the whole ring (or bar) is painted in the current level's colour instead of `color`, so the level reads at a glance rather than only at the tip of a gradient. A level left out keeps `color`. Unset by default, which keeps `color` as before.
+  - **full_size**: Circular only. Draw the ring out to the edge of its `size` box. By default the stroke is inset by a pixel more than half its thickness, so a `size: 16` ring with `thickness: 3` is 13px across with its edges on half pixels; with `full_size: true` it is 16px across and its edges are crisp. Default `false`.
 
 The `label` and `label_alt` options use format strings that can include placeholders for memory metrics. These placeholders will be replaced with actual values when the widget is rendered. You can use `{virtual_mem_free}`, `{virtual_mem_percent}`, `{virtual_mem_total}`, `{virtual_mem_avail}`, `{virtual_mem_used}`, `{virtual_mem_outof}`, `{swap_mem_free}`, `{swap_mem_percent}`, `{swap_mem_total}`
 
+
+## Level-coloured ring
+
+With `progress_bar.level_colors` the ring takes one colour per `memory_thresholds` level, and the level class on `.widget-container` lets the icon follow it. This keeps the ring green up to 60%, yellow above 60% up to 85%, and red above 85%, with the icon grey until the level reaches `high`:
+
+```yaml
+memory_thresholds:
+  low: 25
+  medium: 60
+  high: 85
+progress_bar:
+  enabled: true
+  size: 16
+  thickness: 3
+  color: "#a6e3a1"          # low and medium are left out, so they keep this
+  level_colors:
+    high: "#f9e2af"
+    critical: "#f38ba8"
+```
+
+```css
+.memory-widget .widget-container .icon { color: #a6adc8; }
+.memory-widget .widget-container.status-high .icon { color: #f9e2af; }
+.memory-widget .widget-container.status-critical .icon { color: #f38ba8; }
+```
 
 ## Example Style
 ```css
@@ -177,11 +206,11 @@ The `label` and `label_alt` options use format strings that can include placehol
 .memory-widget .widget-container .label.status-high {}
 .memory-widget .widget-container .label.status-critical {}
 
-/* Icon status classes */
-.memory-widget .widget-container .icon.status-low {}
-.memory-widget .widget-container .icon.status-medium {}
-.memory-widget .widget-container .icon.status-high {}
-.memory-widget .widget-container .icon.status-critical {}
+/* Level classes on the container (from memory_thresholds), to style the icon or anything inside by level */
+.memory-widget .widget-container.status-low .icon {}
+.memory-widget .widget-container.status-medium .icon {}
+.memory-widget .widget-container.status-high .icon {}
+.memory-widget .widget-container.status-critical .icon {}
 
 /* Progress bar styles (if enabled) */
 .memory-widget .progress-container {}

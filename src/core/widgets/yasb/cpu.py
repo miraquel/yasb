@@ -7,7 +7,9 @@ from core.utils.stat_popup import PinnablePopup, StatRow, build_stat_popup
 from core.utils.utilities import (
     PopupWidget,
     build_progress_widget,
+    level_color,
     refresh_widget_style,
+    set_container_level,
 )
 from core.validation.widgets.yasb.cpu import CpuConfig
 from core.widgets.base import BaseWidget
@@ -170,6 +172,10 @@ class CpuWidget(BaseWidget):
         label_parts = [part for part in label_parts if part]
         widget_index = 0
 
+        level = self._get_cpu_threshold(data.percent)
+        # On the container, so CSS can colour the icon too: .widget-container.status-high .icon
+        set_container_level(self._widget_container, level)
+
         if self.config.progress_bar.enabled and self.progress_widget:
             if self._widget_container_layout.indexOf(self.progress_widget) == -1:
                 self._widget_container_layout.insertWidget(
@@ -177,6 +183,9 @@ class CpuWidget(BaseWidget):
                     self.progress_widget,
                 )
             self.progress_widget.set_value(data.percent)
+            self.progress_widget.set_color(
+                level_color(self.config.progress_bar.level_colors, level, self.config.progress_bar.color)
+            )
 
         for part in label_parts:
             part = part.strip()
@@ -188,7 +197,7 @@ class CpuWidget(BaseWidget):
                     label_class = "label alt" if self._show_alt_label else "label"
                     formatted_text = part.format(info=cpu_info)
                     active_widgets[widget_index].setText(formatted_text)
-                    new_class = f"{label_class} status-{self._get_cpu_threshold(data.percent)}"
+                    new_class = f"{label_class} status-{level}"
                     if active_widgets[widget_index].property("class") != new_class:
                         active_widgets[widget_index].setProperty("class", new_class)
                         refresh_widget_style(active_widgets[widget_index])

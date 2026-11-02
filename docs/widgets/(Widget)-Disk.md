@@ -68,6 +68,8 @@ progress_bar:
   background_color: "#3C3C3C"
   position: "left"
   animation: true
+  level_colors: null
+  full_size: false
 ```
 
 ## Example Configuration
@@ -107,7 +109,7 @@ disk:
 - **volume_label:** Partition/volume which you want to show in the bar.
 - **decimal_display:** The number of decimal places to show, default 1 (min 0 max 3).
 - **update_interval:** The interval in seconds to update the disk widget. Must be between 0 and 3600.
-- **disk_thresholds:** A dictionary specifying the thresholds for disk usage levels. The keys are `low`, `medium`, and `high`, and the values are the percentage thresholds. Based on the current disk usage, a CSS class is applied to the label: `status-low`, `status-medium`, `status-high`, or `status-critical`.
+- **disk_thresholds:** A dictionary specifying the thresholds for disk usage levels. The keys are `low`, `medium`, and `high`, and the values are the percentage thresholds. Each value is the top of its level, inclusive. Based on the current disk usage, a CSS class is applied to the text labels and to `.widget-container`: `status-low`, `status-medium`, `status-high`, or `status-critical`.
 - **group_label:** Group labels for multiple disks. This will show the labels of multiple disks in a popup window.
   - **volume_labels:** List of volume labels to show in the group label.
   - **show_label_name:** Show the label name in the group label.
@@ -131,6 +133,8 @@ disk:
   - **color**: The color of the progress bar. Color can be a single color or a gradient. For example, `color: "#57948a"` or `color: ["#57948a", "#ff0000"]` for a gradient.
   - **background_color**: The background color of the progress bar.
   - **animation**: Whether to enable smooth change of the progress bar value.
+  - **level_colors**: Optional colours keyed by the `disk_thresholds` level: `low`, `medium`, `high`, `critical`. When set, the whole ring (or bar) is painted in the current level's colour instead of `color`, so the level reads at a glance rather than only at the tip of a gradient. A level left out keeps `color`. Unset by default, which keeps `color` as before.
+  - **full_size**: Circular only. Draw the ring out to the edge of its `size` box. By default the stroke is inset by a pixel more than half its thickness, so a `size: 16` ring with `thickness: 3` is 13px across with its edges on half pixels; with `full_size: true` it is 16px across and its edges are crisp. Default `false`.
 
 ## Label Format Variables
 The following variables can be used in `label` and `label_alt`:
@@ -151,7 +155,7 @@ The following variables can be used in `label` and `label_alt`:
 | `{space[used][percent]}` | Used space percentage | `50.0%` |
 
 ## Disk Threshold Classes
-Based on `disk_thresholds` configuration, the widget applies CSS classes to style the label based on disk usage:
+Based on `disk_thresholds` configuration, the widget applies these CSS classes to the text labels and to `.widget-container` (so `.disk-widget .widget-container.status-high .icon` styles the icon by level):
 
 | Disk Usage | CSS Class Applied |
 |------------|-------------------|
@@ -159,6 +163,31 @@ Based on `disk_thresholds` configuration, the widget applies CSS classes to styl
 | `low` - `medium` | `status-medium` |
 | `medium` - `high` | `status-high` |
 | Above `high` | `status-critical` |
+
+## Level-coloured ring
+
+With `progress_bar.level_colors` the ring takes one colour per `disk_thresholds` level, and the level class on `.widget-container` lets the icon follow it. This keeps the ring green up to 60%, yellow above 60% up to 85%, and red above 85%, with the icon grey until the level reaches `high`:
+
+```yaml
+disk_thresholds:
+  low: 25
+  medium: 60
+  high: 85
+progress_bar:
+  enabled: true
+  size: 16
+  thickness: 3
+  color: "#a6e3a1"          # low and medium are left out, so they keep this
+  level_colors:
+    high: "#f9e2af"
+    critical: "#f38ba8"
+```
+
+```css
+.disk-widget .widget-container .icon { color: #a6adc8; }
+.disk-widget .widget-container.status-high .icon { color: #f9e2af; }
+.disk-widget .widget-container.status-critical .icon { color: #f38ba8; }
+```
 
 ## Widget Style
 ```css
@@ -173,6 +202,11 @@ Based on `disk_thresholds` configuration, the widget applies CSS classes to styl
 .disk-widget .widget-container .label.status-medium {}
 .disk-widget .widget-container .label.status-high {}
 .disk-widget .widget-container .label.status-critical {}
+/* Level classes on the container (from disk_thresholds), to style the icon or anything inside by level */
+.disk-widget .widget-container.status-low .icon {}
+.disk-widget .widget-container.status-medium .icon {}
+.disk-widget .widget-container.status-high .icon {}
+.disk-widget .widget-container.status-critical .icon {}
 /* Group label style */
 .disk-group {}
 .disk-group-row {}
