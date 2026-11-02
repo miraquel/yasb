@@ -1,0 +1,555 @@
+{
+ "location": {
+  "name": "Rajeg",
+  "lat": -6.35,
+  "lon": 106.4581
+ },
+ "current": {
+  "temp_c": 28.5,
+  "feelslike_c": 31.3,
+  "condition": {
+   "code": 1036
+  },
+  "is_day": 1,
+  "wind_kph": 4.3,
+  "precip_mm": 0.0
+ },
+ "forecast": {
+  "forecastday": [
+   {
+    "date": "2026-11-02",
+    "day": {
+     "mintemp_c": 25.2,
+     "maxtemp_c": 33.4
+    },
+    "hour": [
+     {
+      "time_epoch": 1793552400,
+      "chance_of_rain": 10,
+      "condition": {
+       "code": 1000
+      }
+     },
+     {
+      "time_epoch": 1793556000,
+      "chance_of_rain": 27,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793559600,
+      "chance_of_rain": 10,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793563200,
+      "chance_of_rain": 10,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793566800,
+      "chance_of_rain": 28,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793570400,
+      "chance_of_rain": 15,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793574000,
+      "chance_of_rain": 16,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793577600,
+      "chance_of_rain": 26,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793581200,
+      "chance_of_rain": 17,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793584800,
+      "chance_of_rain": 15,
+      "condition": {
+       "code": 1009
+      }
+     },
+     {
+      "time_epoch": 1793588400,
+      "chance_of_rain": 10,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793592000,
+      "chance_of_rain": 11,
+      "condition": {
+       "code": 1009
+      }
+     },
+     {
+      "time_epoch": 1793595600,
+      "chance_of_rain": 11,
+      "condition": {
+       "code": 1009
+      }
+     },
+     {
+      "time_epoch": 1793599200,
+      "chance_of_rain": 10,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793602800,
+      "chance_of_rain": 11,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793606400,
+      "chance_of_rain": 12,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793610000,
+      "chance_of_rain": 36,
+      "condition": {
+       "code": 1240
+      }
+     },
+     {
+      "time_epoch": 1793613600,
+      "chance_of_rain": 22,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793617200,
+      "chance_of_rain": 20,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793620800,
+      "chance_of_rain": 22,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793624400,
+      "chance_of_rain": 20,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793628000,
+      "chance_of_rain": 28,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793631600,
+      "chance_of_rain": 22,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793635200,
+      "chance_of_rain": 19,
+      "condition": {
+       "code": 1036
+      }
+     }
+    ]
+   },
+   {
+    "date": "2026-11-03",
+    "day": {
+     "mintemp_c": 25.7,
+     "maxtemp_c": 32.7
+    },
+    "hour": [
+     {
+      "time_epoch": 1793638800,
+      "chance_of_rain": 18,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793642400,
+      "chance_of_rain": 12,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793646000,
+      "chance_of_rain": 8,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793649600,
+      "chance_of_rain": 18,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793653200,
+      "chance_of_rain": 19,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793656800,
+      "chance_of_rain": 37,
+      "condition": {
+       "code": 1240
+      }
+     },
+     {
+      "time_epoch": 1793660400,
+      "chance_of_rain": 76,
+      "condition": {
+       "code": 1183
+      }
+     },
+     {
+      "time_epoch": 1793664000,
+      "chance_of_rain": 22,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793667600,
+      "chance_of_rain": 42,
+      "condition": {
+       "code": 1180
+      }
+     },
+     {
+      "time_epoch": 1793671200,
+      "chance_of_rain": 57,
+      "condition": {
+       "code": 1240
+      }
+     },
+     {
+      "time_epoch": 1793674800,
+      "chance_of_rain": 23,
+      "condition": {
+       "code": 1240
+      }
+     },
+     {
+      "time_epoch": 1793678400,
+      "chance_of_rain": 38,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793682000,
+      "chance_of_rain": 57,
+      "condition": {
+       "code": 1240
+      }
+     },
+     {
+      "time_epoch": 1793685600,
+      "chance_of_rain": 41,
+      "condition": {
+       "code": 1240
+      }
+     },
+     {
+      "time_epoch": 1793689200,
+      "chance_of_rain": 27,
+      "condition": {
+       "code": 1240
+      }
+     },
+     {
+      "time_epoch": 1793692800,
+      "chance_of_rain": 54,
+      "condition": {
+       "code": 1240
+      }
+     },
+     {
+      "time_epoch": 1793696400,
+      "chance_of_rain": 60,
+      "condition": {
+       "code": 1240
+      }
+     },
+     {
+      "time_epoch": 1793700000,
+      "chance_of_rain": 13,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793703600,
+      "chance_of_rain": 18,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793707200,
+      "chance_of_rain": 35,
+      "condition": {
+       "code": 1150
+      }
+     },
+     {
+      "time_epoch": 1793710800,
+      "chance_of_rain": 57,
+      "condition": {
+       "code": 1183
+      }
+     },
+     {
+      "time_epoch": 1793714400,
+      "chance_of_rain": 20,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793718000,
+      "chance_of_rain": 24,
+      "condition": {
+       "code": 1033
+      }
+     },
+     {
+      "time_epoch": 1793721600,
+      "chance_of_rain": 16,
+      "condition": {
+       "code": 1063
+      }
+     }
+    ]
+   },
+   {
+    "date": "2026-11-04",
+    "day": {
+     "mintemp_c": 24.7,
+     "maxtemp_c": 34.6
+    },
+    "hour": [
+     {
+      "time_epoch": 1793725200,
+      "chance_of_rain": 21,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793728800,
+      "chance_of_rain": 21,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793732400,
+      "chance_of_rain": 18,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793736000,
+      "chance_of_rain": 30,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793739600,
+      "chance_of_rain": 33,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793743200,
+      "chance_of_rain": 28,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793746800,
+      "chance_of_rain": 26,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793750400,
+      "chance_of_rain": 24,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793754000,
+      "chance_of_rain": 19,
+      "condition": {
+       "code": 1036
+      }
+     },
+     {
+      "time_epoch": 1793757600,
+      "chance_of_rain": 16,
+      "condition": {
+       "code": 1009
+      }
+     },
+     {
+      "time_epoch": 1793761200,
+      "chance_of_rain": 11,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793764800,
+      "chance_of_rain": 9,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793768400,
+      "chance_of_rain": 17,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793772000,
+      "chance_of_rain": 17,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793775600,
+      "chance_of_rain": 6,
+      "condition": {
+       "code": 1006
+      }
+     },
+     {
+      "time_epoch": 1793779200,
+      "chance_of_rain": 10,
+      "condition": {
+       "code": 1006
+      }
+     },
+     {
+      "time_epoch": 1793782800,
+      "chance_of_rain": 64,
+      "condition": {
+       "code": 1240
+      }
+     },
+     {
+      "time_epoch": 1793786400,
+      "chance_of_rain": 39,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793790000,
+      "chance_of_rain": 61,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793793600,
+      "chance_of_rain": 19,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793797200,
+      "chance_of_rain": 13,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793800800,
+      "chance_of_rain": 21,
+      "condition": {
+       "code": 1063
+      }
+     },
+     {
+      "time_epoch": 1793804400,
+      "chance_of_rain": 16,
+      "condition": {
+       "code": 1033
+      }
+     },
+     {
+      "time_epoch": 1793808000,
+      "chance_of_rain": 21,
+      "condition": {
+       "code": 1033
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "alerts": {
+  "alert": []
+ }
+}
