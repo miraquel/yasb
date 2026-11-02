@@ -155,6 +155,10 @@ class SkyScene(QFrame):
         self._strength = 100
         self._fx_opacity = 70
         self._edge_fade = 10
+        # Opt-in, off for the AI cards: how much of the left side fades (so a figure laid over
+        # it stays legible) and how much of the bottom fades into what sits below the sky.
+        self._left_fade = 0
+        self._bottom_fade = 0
 
         self._timer = QTimer(self)
         self._timer.setInterval(FRAME_MS)
@@ -163,6 +167,8 @@ class SkyScene(QFrame):
     strength = percent_property("_strength")
     fxopacity = percent_property("_fx_opacity")
     edgefade = percent_property("_edge_fade")
+    leftfade = percent_property("_left_fade")
+    bottomfade = percent_property("_bottom_fade")
 
     def set_tip(self, text: str) -> None:
         set_tooltip(self, text)
@@ -237,6 +243,21 @@ class SkyScene(QFrame):
             mask.setColorAt(0, QColor(0, 0, 0, 0))
             mask.setColorAt(min(fade, 0.5), QColor(0, 0, 0, 255))
             mask.setColorAt(max(1 - fade, 0.5), QColor(0, 0, 0, 255))
+            mask.setColorAt(1, QColor(0, 0, 0, 0))
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+            painter.fillRect(QRectF(0, 0, w, h), mask)
+        if self._left_fade > 0:
+            # Faint on the left, full from three quarters across: at 75 the left edge keeps 25%.
+            keep = 1 - self._left_fade / 100
+            mask = QLinearGradient(0, 0, w, 0)
+            mask.setColorAt(0, QColor(0, 0, 0, round(255 * keep)))
+            mask.setColorAt(0.45, QColor(0, 0, 0, round(255 * min(1.0, keep + 0.1))))
+            mask.setColorAt(0.75, QColor(0, 0, 0, 255))
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+            painter.fillRect(QRectF(0, 0, w, h), mask)
+        if self._bottom_fade > 0:
+            mask = QLinearGradient(0, 0, 0, h)
+            mask.setColorAt(1 - self._bottom_fade / 100, QColor(0, 0, 0, 255))
             mask.setColorAt(1, QColor(0, 0, 0, 0))
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
             painter.fillRect(QRectF(0, 0, w, h), mask)
