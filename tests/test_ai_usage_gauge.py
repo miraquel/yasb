@@ -20,33 +20,43 @@ H5, D7 = "5h", "7d"
 w = GaugeWindow
 
 
+def fill(reading: GaugeReading) -> GaugeWindow:
+    assert reading.fill is not None
+    return reading.fill
+
+
+def line(reading: GaugeReading) -> GaugeWindow:
+    assert reading.line is not None
+    return reading.line
+
+
 class PickTest(unittest.TestCase):
     def test_short_drives_below_crit(self):
         r = pick(w(H5, 15), w(D7, 72), 85)
-        self.assertEqual((r.fill.name, r.line.name, r.prefix), ("5h", "7d", ""))
+        self.assertEqual((fill(r).name, line(r).name, r.prefix), ("5h", "7d", ""))
 
     def test_long_takes_over_at_crit(self):
-        self.assertEqual(pick(w(H5, 15), w(D7, 85), 85).fill.name, "7d")
+        self.assertEqual(fill(pick(w(H5, 15), w(D7, 85), 85)).name, "7d")
         r = pick(w(H5, 15), w(D7, 97), 85)
-        self.assertEqual((r.fill.used, r.line.used, r.prefix), (97, 15, "7d"))
+        self.assertEqual((fill(r).used, line(r).used, r.prefix), (97, 15, "7d"))
 
     def test_both_hot_shows_the_week(self):
-        self.assertEqual(pick(w(H5, 88), w(D7, 90), 85).fill.name, "7d")
+        self.assertEqual(fill(pick(w(H5, 88), w(D7, 90), 85)).name, "7d")
 
     def test_swapped_shows_the_other_window(self):
         r = pick(w(H5, 23), w(D7, 41), 85, swapped=True)
-        self.assertEqual((r.fill.name, r.line.name, r.prefix), ("7d", "5h", "7d"))
+        self.assertEqual((fill(r).name, line(r).name, r.prefix), ("7d", "5h", "7d"))
         r = pick(w(H5, 15), w(D7, 97), 85, swapped=True)
-        self.assertEqual((r.fill.name, r.line.name, r.prefix), ("5h", "7d", ""))
+        self.assertEqual((fill(r).name, line(r).name, r.prefix), ("5h", "7d", ""))
 
     def test_long_without_reading_never_takes_over(self):
         r = pick(w(H5, 15), w(D7, None), 85)
-        self.assertEqual((r.fill.name, r.line.used), ("5h", None))
+        self.assertEqual((fill(r).name, line(r).used), ("5h", None))
 
     def test_lone_window_drives_and_ignores_swap(self):
         for swapped in (False, True):
             r = pick(w("1w", 47), None, 85, swapped=swapped)
-            self.assertEqual((r.fill.name, r.line, r.prefix), ("1w", None, ""), swapped)
+            self.assertEqual((fill(r).name, r.line, r.prefix), ("1w", None, ""), swapped)
 
     def test_no_windows(self):
         self.assertEqual(pick(None, None, 85), GaugeReading(None, None, ""))

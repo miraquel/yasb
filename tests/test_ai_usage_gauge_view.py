@@ -6,6 +6,7 @@ corners. Nothing is ever shown.
 """
 
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -16,8 +17,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from PyQt6.QtCore import QPoint, Qt  # noqa: E402
-from PyQt6.QtGui import QImage, QRegion  # noqa: E402
-from PyQt6.QtTest import QTest  # noqa: E402
+from PyQt6.QtGui import QColor, QImage, QRegion  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QFrame, QWidget  # noqa: E402
 
 APP = QApplication.instance() or QApplication([])
@@ -40,8 +40,20 @@ def make(w: int = 100, h: int = 20, animate: bool = False) -> UsageGauge:
     return gauge
 
 
+def host_of(gauge: UsageGauge) -> QFrame:
+    return _KEEP[id(gauge)][0]
+
+
 def host_target(gauge: UsageGauge) -> QFrame:
     return _KEEP[id(gauge)][1]
+
+
+def wait(ms: int) -> None:
+    # Spin the event loop so the gauge's animation timer keeps firing while the time passes.
+    deadline = time.monotonic() + ms / 1000
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.005)
 
 
 def paint(gauge: UsageGauge) -> QImage:
@@ -51,7 +63,7 @@ def paint(gauge: UsageGauge) -> QImage:
     return image
 
 
-def near(colour, rgb: tuple[int, int, int], alpha: int) -> bool:
+def near(colour: QColor, rgb: tuple[int, int, int], alpha: int) -> bool:
     return (
         all(abs(a - b) <= 6 for a, b in zip((colour.red(), colour.green(), colour.blue()), rgb, strict=True))
         and abs(colour.alpha() - alpha) <= 3
@@ -133,7 +145,7 @@ class ShapeAndStyleTest(unittest.TestCase):
 
     def test_stylesheet_sets_the_look(self):
         g = make()
-        g.parentWidget().setStyleSheet(".gauge { qproperty-lowcolor: #94e2d5; qproperty-lowalpha: 50; }")
+        host_of(g).setStyleSheet(".gauge { qproperty-lowcolor: #94e2d5; qproperty-lowalpha: 50; }")
         g.ensurePolished()
         g.set_reading(40, "low", None, None)
         self.assertTrue(near(paint(g).pixelColor(20, 10), TEAL, 128), paint(g).pixelColor(20, 10).getRgb())
@@ -143,7 +155,7 @@ class GeometryAndMotionTest(unittest.TestCase):
     def test_follows_the_target_and_sits_beneath_it(self):
         # A half widens when its sessions badge appears; the fill must follow at once.
         g = make()
-        host, target = g.parentWidget(), host_target(g)
+        host, target = host_of(g), host_target(g)
         # Qt holds back move/resize events for a widget never shown, as the bar's never are.
         host.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
         host.show()
@@ -157,7 +169,7 @@ class GeometryAndMotionTest(unittest.TestCase):
         g = make(animate=True)
         g.set_reading(80, "medium", None, None)
         self.assertLess(g.property("fillshare"), 80)
-        QTest.qWait(500)
+        wait(500)
         self.assertEqual(g.property("fillshare"), 80)
         self.assertEqual(g.reading(), (80, "medium", None, None))
 

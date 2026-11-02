@@ -537,13 +537,14 @@ class CodexUsageWidget(BaseWidget):
         secondary = self._window("secondary")
         windows = self._gauge_windows()
         reading = self._gauge_reading(windows)
+        no_window: dict[str, Any] = {}
         fill_window = next(
             (
                 window
                 for gauge_window, window in windows
                 if gauge_window is reading.fill and gauge_window.used is not None
             ),
-            {},
+            no_window,
         )
         return {
             # The window the fill shows, and its name while that is the longer of two (see _gauge_reading).
@@ -710,8 +711,8 @@ class CodexUsageWidget(BaseWidget):
         """
         present = [(name, self._window(name)) for name in ("primary", "secondary") if self._window(name)]
         if len(present) == 2:
-            minutes = [window.get("duration_mins") for _, window in present]
-            if all(isinstance(m, (int, float)) and m > 0 for m in minutes) and minutes[1] < minutes[0]:
+            first, second = (window.get("duration_mins") for _, window in present)
+            if isinstance(first, (int, float)) and isinstance(second, (int, float)) and 0 < second < first:
                 present.reverse()
         now = time.time()
 

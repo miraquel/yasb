@@ -53,8 +53,10 @@ def pick(short: GaugeWindow | None, long: GaugeWindow | None, crit: float, swapp
     return GaugeReading(short, long, "")
 
 
-def share(used: float | None, mode: Literal["used", "remaining"]) -> float | None:
-    """How much of the half to fill: the share consumed, or what is left in "remaining" mode."""
+def share(used: float | None, mode: str) -> float | None:
+    """How much of the half to fill: the share consumed, or what is left in "remaining" mode.
+
+    ``mode`` is the widget's ``usage_mode`` ("used" or "remaining", validated by its config)."""
     if used is None:
         return None
     value = 100.0 - used if mode == "remaining" else float(used)

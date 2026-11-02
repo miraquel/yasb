@@ -7,12 +7,14 @@ fill and the container's background stays transparent. Every colour, opacity and
 from the stylesheet as a ``-qproperty-``; the defaults only apply until styles.css says otherwise.
 """
 
-from PyQt6.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, QRectF, Qt, pyqtProperty
-from PyQt6.QtGui import QColor, QPainter, QPainterPath
+from typing import Any
+
+from PyQt6.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, QRectF, Qt
+from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent
 from PyQt6.QtWidgets import QWidget
 
 from core.utils.widgets.ai_usage.gauge import Step
-from core.utils.widgets.ai_usage.scene import colour_property
+from core.utils.widgets.ai_usage.scene import colour_property, pyqtProperty
 
 # Matches the ring it replaces (core.utils.progress_bar), so the pill moves the way it always has.
 ANIMATION_MS = 400
@@ -20,24 +22,24 @@ ANIMATION_MS = 400
 EDGE_HIDDEN_FROM = 99.0
 
 
-def _int_property(attr: str) -> pyqtProperty:
-    def getter(self) -> int:
+def _int_property(attr: str) -> Any:
+    def getter(self: QWidget) -> int:
         return getattr(self, attr)
 
-    def setter(self, value: int) -> None:
+    def setter(self: QWidget, value: int) -> None:
         setattr(self, attr, int(value))
         self.update()
 
     return pyqtProperty(int, getter, setter)
 
 
-def _share_property(attr: str) -> pyqtProperty:
+def _share_property(attr: str) -> Any:
     # The animated share; None (nothing painted) reads as 0 so an animation can start from it.
-    def getter(self) -> float:
+    def getter(self: QWidget) -> float:
         value = getattr(self, attr)
         return 0.0 if value is None else value
 
-    def setter(self, value: float) -> None:
+    def setter(self: QWidget, value: float) -> None:
         setattr(self, attr, float(value))
         self.update()
 
@@ -97,8 +99,8 @@ class UsageGauge(QWidget):
         animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         return animation
 
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if obj is self._target and event.type() in (QEvent.Type.Move, QEvent.Type.Resize):
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a0 is self._target and a1 is not None and a1.type() in (QEvent.Type.Move, QEvent.Type.Resize):
             self.setGeometry(self._target.geometry())
         return False
 
@@ -162,34 +164,30 @@ class UsageGauge(QWidget):
         piece.addRect(rect)
         painter.fillPath(outline.intersected(piece), colour)
 
-    def paintEvent(self, event) -> None:
-        fill = self._fill_share if self._fill_step is not None else None
-        line = self._line_share if self._line_step is not None else None
-        if fill is None and line is None:
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
+        fill_step, fill = self._fill_step, self._fill_share
+        line_step, line = self._line_step, self._line_share
+        if (fill_step is None or fill is None) and (line_step is None or line is None):
             return
         w, h = self.width(), self.height()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         outline = self._outline()
-        if fill is not None:
+        if fill_step is not None and fill is not None:
             width = round(w * fill / 100)
             if width > 0:
                 alpha = {"low": self._low_alpha, "medium": self._medium_alpha, "high": self._high_alpha}
-                self._fill_rect(
-                    painter, outline, QRectF(0, 0, width, h), self._tint(self._fill_step, alpha[self._fill_step])
-                )
+                self._fill_rect(painter, outline, QRectF(0, 0, width, h), self._tint(fill_step, alpha[fill_step]))
                 if fill < EDGE_HIDDEN_FROM:
                     self._fill_rect(
-                        painter, outline, QRectF(width - 1, 0, 1, h), self._tint(self._fill_step, self._edge_alpha)
+                        painter, outline, QRectF(width - 1, 0, 1, h), self._tint(fill_step, self._edge_alpha)
                     )
-        if line is not None and line > 0:
+        if line_step is not None and line is not None and line > 0:
             # Measured from where a rounded left end's curve meets the bottom: from x=0 a small
             # share would sit wholly inside the curve and never show. 100% still reaches the end.
             start = min(float(self._left_radius), h / 2, w / 2)
             width = round(start + (w - start) * line / 100)
             height = min(self._line_height, h)
             if height > 0:
-                self._fill_rect(
-                    painter, outline, QRectF(0, h - height, width, height), QColor(self._hue(self._line_step))
-                )
+                self._fill_rect(painter, outline, QRectF(0, h - height, width, height), QColor(self._hue(line_step)))
         painter.end()
