@@ -2,6 +2,8 @@
 no forecast, the header line's state and the axis. Filled offscreen; no popup is shown."""
 
 import unittest
+from datetime import datetime
+from typing import Any
 
 from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QWidget
 
@@ -21,7 +23,7 @@ CONFIG = "Example Town"
 PLACE = Place("-6.18,106.63", "windows", "")
 ICONS = WeatherIconsConfig().model_dump()
 
-HEROES = {
+HEROES: dict[str, tuple[dict[int, int], datetime, dict[str, Any]]] = {
     "coming": (rain(13, [10, 25, 70, 95, 60, 35, 20, 15, 10, 10, 5, 5]), at(13, 10), {}),
     "coming-now": (rain(13, [70, 60, 20]), at(13, 10), {}),
     "raining": (rain(16, [95, 60, 35, 20, 15]), at(16, 20), {"code": 1189, "precip": 1.2}),
@@ -30,7 +32,7 @@ HEROES = {
 }
 
 
-def view_for(state, place=PLACE, **extra):
+def view_for(state: str, place: Place | None = PLACE, **extra: Any):
     if state == "none":
         return card_view(None, None, CONFIG, at(13, 10), T, 12)
     chances, now, kw = HEROES[state]
@@ -38,7 +40,7 @@ def view_for(state, place=PLACE, **extra):
 
 
 def classes(widget: QWidget) -> list[str]:
-    return (widget.property("class") or "").split()
+    return str(widget.property("class") or "").split()
 
 
 def by_class(root: QWidget, cls: str) -> QWidget:
@@ -46,6 +48,12 @@ def by_class(root: QWidget, cls: str) -> QWidget:
         if cls in classes(child):
             return child
     raise AssertionError(f"no descendant with class {cls!r}")
+
+
+def label_by_class(root: QWidget, cls: str) -> QLabel:
+    widget = by_class(root, cls)
+    assert isinstance(widget, QLabel), cls
+    return widget
 
 
 def all_by_class(root: QWidget, cls: str) -> list[QWidget]:
@@ -72,27 +80,31 @@ class CardTests(unittest.TestCase):
                 view = view_for(state)
                 self.card.set_view(view)
                 self.assertIn(state, classes(by_class(self.card, "hero")))
-                texts = tuple(by_class(self.card, c).text() for c in ("hero-label", "hero-figure", "hero-line"))
+                texts = tuple(label_by_class(self.card, c).text() for c in ("hero-label", "hero-figure", "hero-line"))
                 self.assertEqual(texts, (view.hero.label, view.hero.figure, view.hero.line))
 
     def test_no_forecast_hides_sky_and_days(self):
         self.card.set_view(view_for("none"))
         self.assertTrue(self.card.sky.isHidden())
         self.assertTrue(by_class(self.card, "days").isHidden())
-        self.assertEqual({b.level for b in by_class(self.card, "hour-bars").bars}, {"none"})
+        bars = by_class(self.card, "hour-bars")
+        assert isinstance(bars, RainBars)
+        self.assertEqual({b.level for b in bars.bars}, {"none"})
         self.assertIn("none", classes(by_class(self.card, "temp")))
 
     def test_forecast_shows_sky_and_days(self):
         self.card.set_view(view_for("coming"))
         self.assertFalse(self.card.sky.isHidden())
         self.assertEqual(len(all_by_class(self.card, "day")), 2)
-        self.assertEqual(self.card.sky.model.weather.code, 2)
+        weather = self.card.sky.model.weather
+        assert weather is not None
+        self.assertEqual(weather.code, 2)
 
     def test_alert_line_shows_only_with_an_alert(self):
         self.card.set_view(view_for("coming"))
         self.assertTrue(by_class(self.card, "hero-alert").isHidden())
         self.card.set_view(view_for("coming", alerts=("Flood warning for Tangerang",)))
-        alert = by_class(self.card, "hero-alert")
+        alert = label_by_class(self.card, "hero-alert")
         self.assertFalse(alert.isHidden())
         self.assertEqual(alert.text(), "Flood warning for Tangerang")
 
@@ -101,7 +113,7 @@ class CardTests(unittest.TestCase):
         self.card.set_view(view_for("coming", alerts=("Flood warning for Tangerang",)))
         for cls in ("hero-alert", "line"):
             with self.subTest(label=cls):
-                label = by_class(self.card, cls)
+                label = label_by_class(self.card, cls)
                 label.setStyleSheet("padding-top: 2px; color: #ffffff; background-color: #000000;")
                 label.resize(300, 24)
                 plain = QLabel(label.text())
@@ -113,7 +125,7 @@ class CardTests(unittest.TestCase):
 
     def test_header_line_state_class(self):
         self.card.set_view(view_for("coming", place=Place(CONFIG, "config", "off")))
-        line = by_class(self.card, "line")
+        line = label_by_class(self.card, "line")
         self.assertIn("warn", classes(line))
         self.assertEqual(line.text(), "From your config, Windows location is off")
 

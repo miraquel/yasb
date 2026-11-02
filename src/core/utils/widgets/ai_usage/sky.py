@@ -349,7 +349,7 @@ class Sky:
         self.light = 0.0
         self._w = 0.0
         self._h = 0.0
-        self._key: tuple[int, int, float, float] | None = None
+        self._key: tuple[int, int, float, float, float] | None = None
         self._moon_key: tuple[int, bool] | None = None
         self._moon: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
         self._top = PALETTE["night"][0]

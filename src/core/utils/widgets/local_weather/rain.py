@@ -163,16 +163,17 @@ def hero_reading(hours: list[Hour] | None, raining: bool, now: datetime, t: Thre
     )
 
 
-def day_blocks(day: Day, tz: tzinfo, t: Thresholds) -> tuple[Bar, ...]:
+def day_blocks(day: Day, tz: tzinfo | None, t: Thresholds) -> tuple[Bar, ...]:
     """Eight 3-hour blocks (00-03 ... 21-24), each the highest chance in its hours."""
     blocks: list[int | None] = [None] * 8
     for h in day.hours:
         b = datetime.fromtimestamp(h.start, tz).hour // 3
-        blocks[b] = h.chance if blocks[b] is None else max(blocks[b], h.chance)
+        prev = blocks[b]
+        blocks[b] = h.chance if prev is None else max(prev, h.chance)
     return tuple(mini_bar(c, t) for c in blocks)
 
 
-def day_text(day: Day, tz: tzinfo, t: Thresholds) -> str:
+def day_text(day: Day, tz: tzinfo | None, t: Thresholds) -> str:
     wet = [h for h in day.hours if h.chance >= t.wet]
     if not wet:
         return "Mostly dry"

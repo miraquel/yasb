@@ -95,7 +95,7 @@ class WeatherCard(QFrame):
         self._bars.setProperty("class", "hour-bars")
         axis = _frame("axis")
         ticks = _box(QHBoxLayout(axis))
-        self._ticks = []
+        self._ticks: list[QLabel] = []
         for i in range(card_hours):
             tick = _label("tick now" if i == 0 else "tick", Qt.AlignmentFlag.AlignHCenter)
             ticks.addWidget(tick, 1)
@@ -120,10 +120,10 @@ class WeatherCard(QFrame):
         # its box's left edge, so stacked lines share one.
         align_label_text(self)
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched is self._hero and event.type() == QEvent.Type.Resize:
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a0 is self._hero and a1 is not None and a1.type() == QEvent.Type.Resize:
             self.sky.setGeometry(0, 0, self._hero.width(), SKY_HEIGHT)
-        return super().eventFilter(watched, event)
+        return super().eventFilter(a0, a1)
 
     def set_view(self, view: CardView) -> None:
         self._glyph.setText(self._icons.get(view.icon_key, self._icons.get(NO_DATA_ICON, "")))

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Widget-level tests for the Local Weather pill: its options, its state classes, the strip and the
 time, the alternate label, and the card it builds. No fetcher runs (no API key), so nothing here
 looks the laptop up or calls WeatherAPI."""
@@ -5,7 +6,7 @@ looks the laptop up or calls WeatherAPI."""
 import unittest
 
 from pydantic import ValidationError
-from PyQt6.QtWidgets import QApplication, QLabel
+from PyQt6.QtWidgets import QApplication, QLabel, QWidget
 
 from tests.support.local_weather import at, first_ink, payload, rain
 
@@ -20,8 +21,8 @@ PLACE = Place("-6.18,106.63", "windows", "")
 COMING = rain(13, [10, 25, 70, 95, 60, 35])
 
 
-def classes(widget) -> list[str]:
-    return (widget.property("class") or "").split()
+def classes(widget: QWidget) -> list[str]:
+    return str(widget.property("class") or "").split()
 
 
 class OptionsTests(unittest.TestCase):
@@ -39,11 +40,13 @@ class OptionsTests(unittest.TestCase):
         )
         self.assertEqual((config.api_key, config.update_interval), ("env", 600))
         with self.assertRaises(ValidationError):
-            LocalWeatherConfig(location=CONFIG, rain={"wet_threshold": 30, "heavy_threshold": 20})
+            LocalWeatherConfig.model_validate(
+                {"location": CONFIG, "rain": {"wet_threshold": 30, "heavy_threshold": 20}}
+            )
         with self.assertRaises(ValidationError):
-            LocalWeatherConfig()
+            LocalWeatherConfig.model_validate({})
         with self.assertRaises(ValidationError):
-            LocalWeatherConfig(location=CONFIG, show_hourly_forecast=True)
+            LocalWeatherConfig.model_validate({"location": CONFIG, "show_hourly_forecast": True})
 
 
 class WidgetTests(unittest.TestCase):

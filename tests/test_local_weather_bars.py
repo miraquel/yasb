@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for the painted rain bars and the sky's opt-in left and bottom fades, rendered offscreen
 and read back pixel by pixel."""
 
@@ -5,7 +6,7 @@ import unittest
 
 from PyQt6.QtCore import QSize
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QWidget
 
 APP = QApplication.instance() or QApplication([])
 
@@ -18,7 +19,7 @@ from tests.support.local_weather import at  # noqa: E402
 PILL = [Bar("wet", 13), Bar("dry", 2), Bar("heavy", 13), Bar("none", 2), Bar("wet", 4), Bar("dry", 2)]
 
 
-def pixel(widget, x, y) -> str:
+def pixel(widget: QWidget, x: int, y: int) -> str:
     return widget.grab().toImage().pixelColor(x, y).name()
 
 
@@ -57,8 +58,10 @@ class SkyFadeTests(unittest.TestCase):
         sky._tick()
         return sky
 
-    def alpha(self, sky, x, y) -> int:
-        return sky._image.pixelColor(x, y).alpha()
+    def alpha(self, sky: SkyScene, x: int, y: int) -> int:
+        image = sky._image
+        assert image is not None
+        return image.pixelColor(x, y).alpha()
 
     def test_sky_left_fade(self):
         sky = self.scene()

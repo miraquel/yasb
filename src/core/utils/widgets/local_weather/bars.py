@@ -7,7 +7,7 @@ import math
 from collections.abc import Callable, Sequence
 
 from PyQt6.QtCore import QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QFontMetricsF, QPainter
+from PyQt6.QtGui import QColor, QFontMetricsF, QPainter, QPaintEvent
 from PyQt6.QtWidgets import QFrame, QSizePolicy, QWidget
 
 from core.utils.widgets.ai_usage.scene import colour_property
@@ -84,8 +84,8 @@ class RainBars(QFrame):
     def _colour(self, bar: Bar) -> QColor:
         return {"wet": self._wet, "heavy": self._heavy, "dry": self._dry}.get(bar.level, self._none)
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
+        super().paintEvent(a0)
         if not self._bars:
             return
         area = self.contentsRect()

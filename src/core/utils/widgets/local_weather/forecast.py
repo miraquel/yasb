@@ -3,6 +3,7 @@ day's hours. Only the fields the widget uses are kept."""
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Any, cast
 
 
 @dataclass(frozen=True)
@@ -41,7 +42,7 @@ class Forecast:
     fetched_at: float  # epoch seconds the response arrived
 
 
-def parse_forecast(payload: dict, fetched_at: float) -> Forecast | None:
+def parse_forecast(payload: dict[str, Any], fetched_at: float) -> Forecast | None:
     """The forecast in ``payload``, or None when it is an error body or is missing a part."""
     try:
         location = payload["location"]
@@ -85,12 +86,15 @@ def parse_forecast(payload: dict, fetched_at: float) -> Forecast | None:
 
 def _alerts(block: object) -> tuple[str, ...]:
     """Alert headlines. Alerts are optional, so a block of an unexpected shape is just none."""
-    items = block.get("alert") if isinstance(block, dict) else None
+    items = cast(dict[str, object], block).get("alert") if isinstance(block, dict) else None
     if not isinstance(items, list):
         return ()
-    return tuple(
-        a["headline"] for a in items if isinstance(a, dict) and isinstance(a.get("headline"), str) and a["headline"]
-    )
+    headlines: list[str] = []
+    for item in cast(list[object], items):
+        headline = cast(dict[str, object], item).get("headline") if isinstance(item, dict) else None
+        if isinstance(headline, str) and headline:
+            headlines.append(headline)
+    return tuple(headlines)
 
 
 def hours_from(forecast: Forecast, now: datetime, count: int) -> list[Hour]:

@@ -2,6 +2,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QLabel, QVBoxLayout
@@ -90,7 +91,7 @@ class LocalWeatherWidget(BaseWidget):
         self._minute_timer.start()
 
     # ------------------------------------------------------------------ data ----
-    def _on_forecast(self, payload: dict, place: Place) -> None:
+    def _on_forecast(self, payload: dict[str, Any], place: Place) -> None:
         forecast = parse_forecast(payload, self._now().timestamp())
         if forecast is not None:
             self._forecast, self._place = forecast, place

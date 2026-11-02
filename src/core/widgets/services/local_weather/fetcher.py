@@ -10,6 +10,7 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Callable
+from typing import Any, cast
 
 from PyQt6.QtCore import QObject, QTimer, QUrl, pyqtSignal
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
@@ -113,7 +114,9 @@ class LocalWeatherFetcher(QObject):
         request.setRawHeader(*HEADER)
         request.setRawHeader(*CACHE_CONTROL)
         request.setTransferTimeout(TRANSFER_TIMEOUT_MS)
-        self._requests[self._manager.get(request)] = place
+        reply = self._manager.get(request)
+        if reply is not None:
+            self._requests[reply] = place
 
     def _on_reply(self, reply: QNetworkReply) -> None:
         place = self._requests.pop(reply, None)
@@ -128,9 +131,9 @@ class LocalWeatherFetcher(QObject):
         finally:
             reply.deleteLater()
         if place is not None:
-            self._on_payload(data if isinstance(data, dict) else None, place)
+            self._on_payload(cast(dict[str, Any], data) if isinstance(data, dict) else None, place)
 
-    def _on_payload(self, data: dict | None, place: Place) -> None:
+    def _on_payload(self, data: dict[str, Any] | None, place: Place) -> None:
         self._busy_since = None
         if data is not None and parse_forecast(data, 0.0) is not None:
             self._retry_timer.stop()

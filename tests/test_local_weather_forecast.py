@@ -4,6 +4,7 @@ code means (raining now, the pill's colour, the sky's weather)."""
 import json
 import unittest
 from datetime import date
+from typing import Any
 
 from core.utils.widgets.local_weather.conditions import condition, condition_class, is_raining_now, wmo_code
 from core.utils.widgets.local_weather.forecast import Current, hours_from, parse_forecast
@@ -13,6 +14,7 @@ from tests.support.local_weather import FIXTURE, at, forecast, payload, rain
 class ParseTests(unittest.TestCase):
     def test_recorded_payload_parses(self):
         f = parse_forecast(json.loads(FIXTURE.read_text("utf-8")), 0.0)
+        assert f is not None
         self.assertEqual(len(f.days), 3)
         self.assertTrue(all(len(d.hours) == 24 for d in f.days))
         starts = [h.start for d in f.days for h in d.hours]
@@ -21,6 +23,7 @@ class ParseTests(unittest.TestCase):
 
     def test_synthetic_payload_fields(self):
         f = parse_forecast(payload(rain(13, [70]), alerts=("Flood warning",)), 123.0)
+        assert f is not None
         self.assertEqual((f.place, f.lat, f.lon), ("Rajeg", -6.18, 106.63))
         self.assertEqual(f.current, Current(32.4, 38.1, 1003, True, 9.0, 0.0))
         self.assertEqual(f.days[0].date, date(2026, 11, 2))
@@ -30,7 +33,7 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(f.fetched_at, 123.0)
 
     def test_payload_missing_forecast_is_rejected(self):
-        broken = [
+        broken: list[dict[str, Any]] = [
             {},
             {"error": {"code": 1006, "message": "No matching location found."}},
             {**payload(), "forecast": {}},
@@ -47,13 +50,15 @@ class ParseTests(unittest.TestCase):
                 data = payload(rain(13, [70]))
                 data["alerts"] = alerts
                 f = parse_forecast(data, 0.0)
-                self.assertIsNotNone(f)
+                assert f is not None
                 self.assertEqual(f.alerts, ())
 
     def test_day_with_no_hours_parses_empty(self):
         data = payload()
         data["forecast"]["forecastday"][2]["hour"] = []
-        self.assertEqual(parse_forecast(data, 0.0).days[2].hours, ())
+        f = parse_forecast(data, 0.0)
+        assert f is not None
+        self.assertEqual(f.days[2].hours, ())
 
 
 class HoursTests(unittest.TestCase):

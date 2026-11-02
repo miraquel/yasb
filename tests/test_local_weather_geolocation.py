@@ -5,7 +5,8 @@ import sys
 import unittest
 from datetime import timedelta
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 from unittest import mock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -17,11 +18,19 @@ if str(SRC_ROOT) not in sys.path:
 from core.widgets.services.local_weather.geolocation import windows_fix  # noqa: E402
 
 
-def fake_api(access="ALLOWED", status="READY", position=(-6.17834, 106.63191), error=None, seen=None):
-    async def _access():
+def fake_api(
+    access: str = "ALLOWED",
+    status: str = "READY",
+    position: tuple[float, float] = (-6.17834, 106.63191),
+    error: Exception | None = None,
+    seen: dict[str, Any] | None = None,
+) -> ModuleType:
+    """A stand-in for ``winrt.windows.devices.geolocation`` with just what ``windows_fix`` uses."""
+
+    async def _access() -> str:
         return access
 
-    async def _position(max_age, timeout):
+    async def _position(max_age: timedelta, timeout: timedelta) -> SimpleNamespace:
         if seen is not None:
             seen.update(max_age=max_age, timeout=timeout)
         if error:
@@ -32,20 +41,21 @@ def fake_api(access="ALLOWED", status="READY", position=(-6.17834, 106.63191), e
     class Geolocator:
         request_access_async = staticmethod(_access)
 
-        def __init__(self):
-            self.desired_accuracy_in_meters = None
+        def __init__(self) -> None:
+            self.desired_accuracy_in_meters: int | None = None
             self.location_status = status
             if seen is not None:
                 seen["locator"] = self
 
-        def get_geoposition_async_with_age_and_timeout(self, max_age, timeout, /):
+        def get_geoposition_async_with_age_and_timeout(self, max_age: timedelta, timeout: timedelta, /):
             return _position(max_age, timeout)
 
-    return SimpleNamespace(
+    fake = SimpleNamespace(
         Geolocator=Geolocator,
         GeolocationAccessStatus=SimpleNamespace(ALLOWED="ALLOWED"),
         PositionStatus=SimpleNamespace(DISABLED="DISABLED", NOT_AVAILABLE="NOT_AVAILABLE"),
     )
+    return cast(ModuleType, fake)
 
 
 class WindowsFixTests(unittest.TestCase):
@@ -68,7 +78,7 @@ class WindowsFixTests(unittest.TestCase):
             self.assertEqual(windows_fix(), "no_fix")
 
     def test_requests_accuracy_and_age(self):
-        seen = {}
+        seen: dict[str, Any] = {}
         windows_fix(api=fake_api(seen=seen))
         self.assertEqual(seen["max_age"], timedelta(seconds=600))
         self.assertEqual(seen["timeout"], timedelta(seconds=10))

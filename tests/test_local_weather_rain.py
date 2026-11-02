@@ -2,6 +2,8 @@
 the day rows. Fixed Jakarta times, synthetic payloads, no clock."""
 
 import unittest
+from datetime import datetime
+from typing import Any
 
 from core.utils.widgets.local_weather.forecast import hours_from
 from core.utils.widgets.local_weather.rain import (
@@ -24,16 +26,16 @@ RAINING = rain(16, [95, 60, 35, 20, 15])
 DRY = rain(13, [5, 10, 10, 15, 10, 5, 5, 5, 10, 10, 5, 5])
 
 
-def hours(chances, now, **kw):
+def hours(chances: dict[int, int], now: datetime, **kw: Any):
     return hours_from(forecast(chances, **kw), now, 24)
 
 
-def pill(chances, now=None, raining=False, count=6):
+def pill(chances: dict[int, int], now: datetime | None = None, raining: bool = False, count: int = 6):
     now = now or at(13, 10)
     return pill_reading(hours(chances, now), raining, now, T, count)
 
 
-def hero(chances, now=None, raining=False):
+def hero(chances: dict[int, int], now: datetime | None = None, raining: bool = False):
     now = now or at(13, 10)
     h = hero_reading(hours(chances, now), raining, now, T, 12)
     return (h.state, h.label, h.figure, h.line)

@@ -1,7 +1,9 @@
+# pyright: reportPrivateUsage=false
 """Tests for the fetcher's decisions: the request URL, what counts as a forecast, the one-minute
 retry, and not stacking lookups. Nothing here touches the network or Windows location."""
 
 import unittest
+from typing import Any
 
 from PyQt6.QtWidgets import QApplication
 
@@ -20,8 +22,13 @@ def no_locate():
 class FetcherTests(unittest.TestCase):
     def setUp(self):
         self.fetcher = LocalWeatherFetcher(None, "KEY", LocationTracker("Example Town"), no_locate, 600_000)
-        self.finished, self.failed = [], []
-        self.fetcher.finished.connect(lambda data, place: self.finished.append(place))
+        self.finished: list[Place] = []
+        self.failed: list[Place] = []
+
+        def on_finished(data: dict[str, Any], place: Place) -> None:
+            self.finished.append(place)
+
+        self.fetcher.finished.connect(on_finished)
         self.fetcher.failed.connect(self.failed.append)
 
     def tearDown(self):
@@ -52,12 +59,14 @@ class FetcherTests(unittest.TestCase):
         self.assertEqual(self.finished, [])
 
     def test_refresh_skips_while_busy_but_not_forever(self):
-        calls = []
+        calls: list[int] = []
         self.fetcher._start_locate = lambda token: calls.append(token)
         self.fetcher.refresh()
         self.fetcher.refresh()
         self.assertEqual(len(calls), 1)
-        self.fetcher._busy_since -= BUSY_TIMEOUT_S + 1
+        busy_since = self.fetcher._busy_since
+        assert busy_since is not None
+        self.fetcher._busy_since = busy_since - (BUSY_TIMEOUT_S + 1)
         self.fetcher.refresh()
         self.assertEqual(len(calls), 2)
 
@@ -68,9 +77,9 @@ class FetcherTests(unittest.TestCase):
 
     def test_lookup_that_never_answers_falls_back(self):
         """A WinRT call that blocks outright never reaches its own timeout; the watchdog stands in."""
-        requests = []
+        requests: list[Place] = []
         self.fetcher._start_locate = lambda token: None  # Windows never answers
-        self.fetcher._request = requests.append
+        self.fetcher._request = lambda place: requests.append(place)
         self.fetcher.refresh()
         self.assertTrue(self.fetcher._locate_watchdog.isActive())
         stale_token = self.fetcher._token
@@ -80,9 +89,9 @@ class FetcherTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
 
     def test_located_result_cancels_the_watchdog(self):
-        requests = []
+        requests: list[Place] = []
         self.fetcher._start_locate = lambda token: None
-        self.fetcher._request = requests.append
+        self.fetcher._request = lambda place: requests.append(place)
         self.fetcher.refresh()
         self.fetcher._located.emit(self.fetcher._token, (-6.17834, 106.63191))
         self.assertFalse(self.fetcher._locate_watchdog.isActive())

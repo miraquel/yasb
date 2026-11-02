@@ -2,7 +2,9 @@
 rows and the sky's input, all at fixed Jakarta times."""
 
 import unittest
+from datetime import datetime
 
+from core.utils.widgets.local_weather.forecast import Forecast
 from core.utils.widgets.local_weather.location import Place
 from core.utils.widgets.local_weather.rain import Bar, Thresholds
 from core.utils.widgets.local_weather.views import SkyInput, card_view, header_line, pill_view
@@ -14,11 +16,11 @@ PLACE = Place("-6.18,106.63", "windows", "")
 COMING = rain(13, [10, 25, 70, 95])
 
 
-def pill(f, now):
+def pill(f: Forecast | None, now: datetime):
     return pill_view(f, CONFIG, now, T, 6)
 
 
-def card(f, now, place=PLACE):
+def card(f: Forecast | None, now: datetime, place: Place | None = PLACE):
     return card_view(f, place, CONFIG, now, T, 12)
 
 

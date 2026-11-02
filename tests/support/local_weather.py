@@ -1,12 +1,16 @@
 """WeatherAPI-shaped payloads for the local weather tests: three Jakarta days from Monday 2026-11-02."""
 
 import sys
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 SRC_ROOT = Path(__file__).resolve().parents[2] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+
+from PyQt6.QtWidgets import QWidget  # noqa: E402
 
 from core.utils.widgets.local_weather.forecast import Forecast, parse_forecast  # noqa: E402
 
@@ -24,9 +28,16 @@ def rain(start: int, values: list[int]) -> dict[int, int]:
     return {start + i: v for i, v in enumerate(values)}
 
 
-def payload(chances=None, *, code=1003, precip=0.0, is_day=1, alerts=()) -> dict:
+def payload(
+    chances: dict[int, int] | None = None,
+    *,
+    code: int = 1003,
+    precip: float = 0.0,
+    is_day: int = 1,
+    alerts: Sequence[str] = (),
+) -> dict[str, Any]:
     chances = chances or {}
-    days = []
+    days: list[dict[str, Any]] = []
     for d in range(3):
         midnight = DAY0 + timedelta(days=d)
         hours = [
@@ -53,11 +64,13 @@ def payload(chances=None, *, code=1003, precip=0.0, is_day=1, alerts=()) -> dict
     }
 
 
-def forecast(chances=None, *, fetched: datetime | None = None, **kw) -> Forecast:
-    return parse_forecast(payload(chances, **kw), (fetched or at(13, 10)).timestamp())
+def forecast(chances: dict[int, int] | None = None, *, fetched: datetime | None = None, **kw: Any) -> Forecast:
+    parsed = parse_forecast(payload(chances, **kw), (fetched or at(13, 10)).timestamp())
+    assert parsed is not None
+    return parsed
 
 
-def first_ink(label) -> int:
+def first_ink(label: QWidget) -> int:
     """The first column of ``label``'s own render that differs from its top-left pixel."""
     image = label.grab().toImage()
     ground = image.pixelColor(0, 0)
