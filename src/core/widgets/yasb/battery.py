@@ -5,6 +5,7 @@ import humanize
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QLabel
 
+from core.utils.tooltip import set_tooltip
 from core.utils.utilities import build_progress_widget, refresh_widget_style
 from core.validation.widgets.yasb.battery import BatteryConfig
 from core.widgets.base import BaseWidget
@@ -101,6 +102,16 @@ class BatteryWidget(BaseWidget):
             )
         return icon
 
+    def _get_tooltip_text(self, state: BatteryData, time_remaining: str) -> str:
+        text = f"Battery {state.percent}%"
+        if state.is_charging:
+            return f"{text}, charging"
+        if state.power_plugged:
+            return f"{text}, plugged in"
+        if time_remaining not in ("unknown", self.config.time_remaining_unlimited_icon):
+            return f"{text}, {time_remaining} left"
+        return text
+
     def _charging_blink(self):
         """Toggle the blink class to create a blinking effect using CSS."""
         label = self._charging_icon_label
@@ -166,6 +177,13 @@ class BatteryWidget(BaseWidget):
                     self.progress_widget,
                 )
             self.progress_widget.set_value(self._battery_state.percent)
+            # The same level the icon gets as its status-* class, charging included
+            level_colors = self.config.progress_bar.level_colors
+            level_color = getattr(level_colors, threshold, None) if level_colors is not None else None
+            self.progress_widget.set_color(level_color or self.config.progress_bar.color)
+
+        if self.config.tooltip:
+            set_tooltip(self, self._get_tooltip_text(self._battery_state, time_remaining))
 
         for part in label_parts:
             part = part.strip()

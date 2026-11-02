@@ -40,6 +40,16 @@ class VolumeProgressBarConfig(CustomBaseModel):
     background_color: str = "#3C3C3C"
     position: str = "left"
     animation: bool = True
+    # Keep the level on a muted bar, painted in this colour. Unset, a muted bar drops to empty.
+    muted_color: str | None = None
+
+
+class VolumeInlineSliderConfig(CustomBaseModel):
+    enabled: bool = False
+    width: int = Field(default=150, ge=20, le=1000)
+    auto_close: int = Field(default=4000, ge=0, le=600000)
+    show_value: bool = True
+    animation_duration: int = Field(default=220, ge=0, le=2000)
 
 
 class VolumeCallbacksConfig(CallbacksConfig):
@@ -65,6 +75,7 @@ class VolumeConfig(CustomBaseModel):
         "100": "\uf028",  # Icon for 61-100% volume
     }
     audio_menu: AudioMenuConfig = AudioMenuConfig()
+    inline_slider: VolumeInlineSliderConfig = VolumeInlineSliderConfig()
     progress_bar: VolumeProgressBarConfig = VolumeProgressBarConfig()
     keybindings: list[KeybindingConfig] = []
     callbacks: VolumeCallbacksConfig = VolumeCallbacksConfig()
