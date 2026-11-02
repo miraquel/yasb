@@ -1,7 +1,7 @@
 """Where the forecast is for: the laptop's position from Windows location, or the config address.
 
-Coordinates stay in memory, rounded to two decimals (about 1 km), and are only ever logged at
-DEBUG.
+Coordinates stay in memory, rounded to two decimals (about 1 km), and are never logged, not even
+at DEBUG.
 """
 
 import logging

@@ -1,5 +1,5 @@
 """Tests for where the forecast is for: a fresh Windows fix, the last one while under two hours old,
-then the config address. Coordinates never reach a log record above DEBUG."""
+then the config address. Coordinates never reach a log record, at any level."""
 
 import logging
 import unittest
