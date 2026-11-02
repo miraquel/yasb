@@ -4,7 +4,7 @@ stylesheet as a ``-qproperty-``, and the defaults only hold until styles.css say
 """
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from PyQt6.QtCore import QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QFontMetricsF, QPainter
@@ -14,6 +14,15 @@ from core.utils.widgets.ai_usage.scene import colour_property
 from core.utils.widgets.local_weather.rain import Bar
 
 LABEL_GAP = 2  # between a bar's top and its chance label
+LABEL_ROOM = 2  # kept clear between neighbouring labels
+
+
+def fit_labels(labels: Sequence[str], width: Callable[[str], float], room: float) -> list[str]:
+    """The chance labels as drawn: if any is wider than its column (a "100%" in a 25px column),
+    every label drops its "%", so the row stays even and no two labels touch."""
+    if all(width(label) <= room for label in labels if label):
+        return list(labels)
+    return [label.removesuffix("%") for label in labels]
 
 
 class RainBars(QFrame):
@@ -86,7 +95,9 @@ class RainBars(QFrame):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setFont(self.font())
-        for i, bar in enumerate(self._bars[: self._count]):
+        bars = self._bars[: self._count]
+        labels = fit_labels([bar.label for bar in bars], metrics.horizontalAdvance, pitch - LABEL_ROOM)
+        for i, (bar, label) in enumerate(zip(bars, labels, strict=True)):
             offset = (pitch - self._bar_width) / 2 if self._spread else 0
             x = area.left() + i * pitch + offset
             height = min(bar.height, area.height())
@@ -94,11 +105,11 @@ class RainBars(QFrame):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(self._colour(bar))
             painter.drawRoundedRect(QRectF(x, bottom - height, self._bar_width, height), radius, radius)
-            if bar.label:
+            if label:
                 centre = x + self._bar_width / 2
                 text = QRectF(
                     centre - pitch / 2, bottom - height - LABEL_GAP - metrics.height(), pitch, metrics.height()
                 )
                 painter.setPen(self._label)
-                painter.drawText(text, int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom), bar.label)
+                painter.drawText(text, int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom), label)
         painter.end()

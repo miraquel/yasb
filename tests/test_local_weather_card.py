@@ -3,7 +3,7 @@ no forecast, the header line's state and the axis. Filled offscreen; no popup is
 
 import unittest
 
-from local_weather_payloads import at, forecast, rain
+from local_weather_payloads import at, first_ink, forecast, rain
 from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QWidget
 
 APP = QApplication.instance() or QApplication([])
@@ -94,6 +94,21 @@ class CardTests(unittest.TestCase):
         alert = by_class(self.card, "hero-alert")
         self.assertFalse(alert.isHidden())
         self.assertEqual(alert.text(), "Flood warning for Tangerang")
+
+    def test_padded_labels_start_on_the_left_edge(self):
+        """The alert and the header line have top padding, which made Qt indent them by ~3px."""
+        self.card.set_view(view_for("coming", alerts=("Flood warning for Tangerang",)))
+        for cls in ("hero-alert", "line"):
+            with self.subTest(label=cls):
+                label = by_class(self.card, cls)
+                label.setStyleSheet("padding-top: 2px; color: #ffffff; background-color: #000000;")
+                label.resize(300, 24)
+                plain = QLabel(label.text())
+                plain.setFont(label.font())
+                plain.setIndent(0)
+                plain.setStyleSheet("color: #ffffff; background-color: #000000;")
+                plain.resize(300, 24)
+                self.assertEqual(first_ink(label), first_ink(plain))
 
     def test_header_line_state_class(self):
         self.card.set_view(view_for("coming", place=Place(CONFIG, "config", "off")))

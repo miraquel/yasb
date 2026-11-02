@@ -340,6 +340,9 @@ class Sky:
         self.weather: Weather | None = None
         self.force_phase: str | None = None
         self.force_weather: int | None = None
+        # The sun and moon keep right of this fraction of the width (0 = the whole sky), so a
+        # figure laid over the left of a sky never has a sun behind it.
+        self.body_min_x = 0.0
 
         self.tick = 0
         self.kind = weather_kind(0)
@@ -436,7 +439,7 @@ class Sky:
         wind = wx.wind if wx is not None else CALM_WIND
 
         # Colours, sun and moon change slowly: work them out once a minute or on new weather.
-        key = (int(t), code, w, h)
+        key = (int(t), code, w, h, self.body_min_x)
         if key != self._key:
             self._key = key
             self._recompute(t, sunrise, sunset, weather_kind(code), now)
@@ -492,7 +495,7 @@ class Sky:
         # The moon goes first so the sun's glow lies over it at the moments both are up.
         night_len = sunrise + 1440 - sunset
         q = ((t - sunset + 1440) % 1440) / night_len
-        moon = arc_point(q, w, h)
+        moon = self._body_point(q, w, h)
         if moon is not None and visible > 0:
             lit, dark = self._moon_rows(now)
             ox, oy = moon[0] - MOON_HALF, moon[1] - MOON_HALF
@@ -500,7 +503,7 @@ class Sky:
             self._fixed.append(Sprite("rects", pixel_rects(lit, MOON_PX, ox, oy), MOON_LIT, visible))
         # The sun by day, along the arc from sunrise to sunset, orange near the horizon.
         p = (t - sunrise) / (sunset - sunrise)
-        sun = arc_point(p, w, h)
+        sun = self._body_point(p, w, h)
         if sun is not None and visible > 0:
             cx, cy = sun
             glow = ((cx - GLOW_RADIUS, cy - GLOW_RADIUS, 2 * GLOW_RADIUS, 2 * GLOW_RADIUS),)
@@ -517,6 +520,12 @@ class Sky:
             min(DROPS, round(kind.rain * density)),
             min(FLAKES, round(kind.snow * density)),
         )
+
+    def _body_point(self, p: float, w: float, h: float) -> tuple[float, float] | None:
+        """``arc_point`` across the part of the sky right of ``body_min_x``."""
+        left = self.body_min_x * w
+        point = arc_point(p, w - left, h)
+        return None if point is None else (point[0] + left, point[1])
 
     def _moon_rows(self, now: datetime) -> tuple[tuple[str, ...], tuple[str, ...]]:
         age = moon_age(now)

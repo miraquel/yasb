@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from PyQt6.QtCore import QEvent, QObject, Qt
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from core.utils.utilities import ElidedLabel, refresh_widget_style
+from core.utils.utilities import ElidedLabel, align_label_text, refresh_widget_style
 from core.utils.widgets.ai_usage.scene import SkyScene
 from core.utils.widgets.ai_usage.sky import Weather
 from core.utils.widgets.local_weather.bars import RainBars
@@ -116,6 +116,9 @@ class WeatherCard(QFrame):
         for row in self._day_rows:
             days.addWidget(row)
         root.addWidget(self._days)
+        # QSS padding gives a label a frame, and Qt then indents its text; keep every text on
+        # its box's left edge, so stacked lines share one.
+        align_label_text(self)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if watched is self._hero and event.type() == QEvent.Type.Resize:

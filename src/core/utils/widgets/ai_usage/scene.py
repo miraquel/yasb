@@ -170,6 +170,15 @@ class SkyScene(QFrame):
     leftfade = percent_property("_left_fade")
     bottomfade = percent_property("_bottom_fade")
 
+    def _get_body_min_x(self) -> int:
+        return round(self.model.body_min_x * 100)
+
+    def _set_body_min_x(self, value: int) -> None:
+        # Opt-in like the fades: the sun and moon keep right of this share of the width.
+        self.model.body_min_x = max(0, min(100, int(value))) / 100
+
+    bodyminx = pyqtProperty(int, _get_body_min_x, _set_body_min_x)
+
     def set_tip(self, text: str) -> None:
         set_tooltip(self, text)
 

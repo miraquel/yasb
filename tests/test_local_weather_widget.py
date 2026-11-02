@@ -4,9 +4,9 @@ looks the laptop up or calls WeatherAPI."""
 
 import unittest
 
-from local_weather_payloads import at, payload, rain
+from local_weather_payloads import at, first_ink, payload, rain
 from pydantic import ValidationError
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QLabel
 
 APP = QApplication.instance() or QApplication([])
 
@@ -95,6 +95,19 @@ class WidgetTests(unittest.TestCase):
         self.widget._on_failed(PLACE)
         self.assertIn("rain-coming", self.container())
         self.assertEqual(self.widget._time.text(), "15:00")
+
+    def test_time_text_starts_at_its_padding(self):
+        """QSS padding gives a label a frame, and Qt then indents its text by half an 'x' more."""
+        self.widget._on_forecast(payload(COMING), PLACE)
+        time = self.widget._time
+        time.setStyleSheet("padding-left: 7px; color: #ffffff; background-color: #000000;")
+        plain = QLabel(time.text())
+        plain.setFont(time.font())
+        plain.setIndent(0)
+        plain.setStyleSheet("color: #ffffff; background-color: #000000;")
+        for label in (time, plain):
+            label.resize(label.sizeHint())
+        self.assertEqual(first_ink(time) - first_ink(plain), 7)
 
     def test_build_card_reflects_the_forecast(self):
         self.widget._on_forecast(payload(COMING), PLACE)

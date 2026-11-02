@@ -55,3 +55,13 @@ def payload(chances=None, *, code=1003, precip=0.0, is_day=1, alerts=()) -> dict
 
 def forecast(chances=None, *, fetched: datetime | None = None, **kw) -> Forecast:
     return parse_forecast(payload(chances, **kw), (fetched or at(13, 10)).timestamp())
+
+
+def first_ink(label) -> int:
+    """The first column of ``label``'s own render that differs from its top-left pixel."""
+    image = label.grab().toImage()
+    ground = image.pixelColor(0, 0)
+    for x in range(image.width()):
+        if any(image.pixelColor(x, y) != ground for y in range(image.height())):
+            return x
+    return -1

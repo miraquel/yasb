@@ -49,6 +49,8 @@ class LocalWeatherWidget(BaseWidget):
         self._time = QLabel()
         self._time.setProperty("class", "rain-time")
         self._time.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        # Its padding-left is the gap after the strip; without this Qt adds half an 'x' to it.
+        self._time.setIndent(0)
         self._widget_container_layout.addWidget(self._strip, 0, Qt.AlignmentFlag.AlignVCenter)
         self._widget_container_layout.addWidget(self._time)
 
