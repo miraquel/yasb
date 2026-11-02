@@ -51,8 +51,16 @@ def is_raining_now(current: Current) -> bool:
     return current.precip_mm > 0 or current.code in RAINING_CODES
 
 
+# Rain or thunder "possible" nearby: a forecast, not weather falling here. Shown as a cloud, so
+# the pill never pairs a rain icon with a dry strip.
+POSSIBLE_CODES = {1063: "Rain possible", 1087: "Thunder possible"}
+_CLOUDY = 1003
+
+
 def condition(code: int, is_day: bool) -> tuple[str, str]:
     """The icon key (the same names as the weather widget's ``icons``) and a short description."""
+    if code in POSSIBLE_CODES:
+        return get_weather(_CLOUDY, is_day)[0], POSSIBLE_CODES[code]
     return get_weather(code, is_day)
 
 

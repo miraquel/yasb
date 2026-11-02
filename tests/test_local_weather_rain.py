@@ -122,6 +122,18 @@ class HeroTests(unittest.TestCase):
             ("none", "Next 12 hours", "No forecast", "Can't reach WeatherAPI. Trying again every minute."),
         )
 
+    def test_coming_peak_is_in_the_first_spell(self):
+        """Two showers: the line speaks of the one that starts, not "heaviest at 22, clears by 17"."""
+        chances = rain(13, [10, 25, 70, 60, 10, 10, 10, 10, 10, 90, 90, 10])
+        self.assertEqual(hero(chances)[3], "Heaviest around 15:00, clears by 17:00")
+
+    def test_raining_lighter_after_stops_at_the_stop(self):
+        """Lighter after the hour it stops says nothing; a line ends at the stop."""
+        self.assertEqual(
+            hero(rain(13, [40, 20, 10, 5]), raining=True),
+            ("raining", "Rain stops around", "14:00", "Heaviest now"),
+        )
+
     def test_wet_hour_beyond_the_window_is_dry(self):
         chances = rain(13 + 14, [90])
         self.assertEqual(hero(chances)[0], "dry")

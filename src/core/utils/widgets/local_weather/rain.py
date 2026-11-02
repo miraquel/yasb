@@ -118,9 +118,10 @@ def pill_reading(hours: list[Hour] | None, raining: bool, now: datetime, t: Thre
     return PillReading("rain-coming", bars, "now" if first == 0 else _clock(hours[first].start, now))
 
 
-def _raining_line(hours: list[Hour], chances: list[int], peak: int, window: int, now: datetime) -> str:
+def _raining_line(hours: list[Hour], chances: list[int], peak: int, end: int, now: datetime) -> str:
+    """ "Heaviest ..., lighter after ...", with "lighter after" only before ``end`` (the stop)."""
     head = "Heaviest now" if peak == 0 else f"Heaviest around {_clock(hours[peak].start, now)}"
-    lighter = next((j for j in range(peak + 1, window) if chances[j] < chances[peak]), None)
+    lighter = next((j for j in range(peak + 1, end) if chances[j] < chances[peak]), None)
     return head + (f", lighter after {_clock(hours[lighter].start, now)}" if lighter is not None else "")
 
 
@@ -135,7 +136,7 @@ def hero_reading(hours: list[Hour] | None, raining: bool, now: datetime, t: Thre
     if raining:
         stop = _first_dry_after(chances, t, 0)
         if stop is not None and stop <= count - 1:
-            line = _raining_line(hours, chances, _peak(chances, 0, stop), window, now)
+            line = _raining_line(hours, chances, _peak(chances, 0, stop), stop, now)
             return Hero("raining", "Rain stops around", _clock(hours[stop].start, now), line)
         line = _raining_line(hours, chances, _peak(chances, 0, window), window, now)
         return Hero("raining-on", "Rain continues past", _clock(hours[window - 1].start + 3600, now), line)
@@ -152,7 +153,8 @@ def hero_reading(hours: list[Hour] | None, raining: bool, now: datetime, t: Thre
     clears = f", clears by {_clock(hours[clear].start, now)}" if clear is not None else ""
     if first == 0:
         return Hero("coming-now", "Rain likely", "Now", f"{chances[0]}% chance this hour{clears}")
-    peak = _peak(chances, 0, window)
+    # The heaviest hour of the spell that starts, so a later shower can't be named before it clears.
+    peak = _peak(chances, first, clear if clear is not None else window)
     return Hero(
         "coming",
         "Rain starts",

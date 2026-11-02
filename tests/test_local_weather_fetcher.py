@@ -7,7 +7,7 @@ from local_weather_payloads import payload
 from PyQt6.QtWidgets import QApplication
 
 from core.utils.widgets.local_weather.location import LocationTracker, Place
-from core.widgets.services.local_weather.fetcher import LocalWeatherFetcher, build_url
+from core.widgets.services.local_weather.fetcher import BUSY_TIMEOUT_S, LocalWeatherFetcher, build_url
 
 APP = QApplication.instance() or QApplication([])
 PLACE = Place("-6.18,106.63", "windows", "")
@@ -53,13 +53,40 @@ class FetcherTests(unittest.TestCase):
 
     def test_refresh_skips_while_busy_but_not_forever(self):
         calls = []
-        self.fetcher._start_locate = lambda: calls.append(1)
+        self.fetcher._start_locate = lambda token: calls.append(token)
         self.fetcher.refresh()
         self.fetcher.refresh()
         self.assertEqual(len(calls), 1)
-        self.fetcher._busy_since -= 31
+        self.fetcher._busy_since -= BUSY_TIMEOUT_S + 1
         self.fetcher.refresh()
         self.assertEqual(len(calls), 2)
+
+    def test_busy_guard_outlasts_a_slow_lookup_and_request(self):
+        """A lookup cut off by the watchdog plus a request at its transfer timeout must not overlap
+        the next refresh, or an older reply could land last and overwrite a newer forecast."""
+        self.assertGreater(BUSY_TIMEOUT_S * 1000, 15_000 + 20_000)
+
+    def test_lookup_that_never_answers_falls_back(self):
+        """A WinRT call that blocks outright never reaches its own timeout; the watchdog stands in."""
+        requests = []
+        self.fetcher._start_locate = lambda token: None  # Windows never answers
+        self.fetcher._request = requests.append
+        self.fetcher.refresh()
+        self.assertTrue(self.fetcher._locate_watchdog.isActive())
+        stale_token = self.fetcher._token
+        self.fetcher._on_locate_timeout()
+        self.assertEqual(requests, [Place("Example Town", "config", "no_fix")])
+        self.fetcher._located.emit(stale_token, (-6.17834, 106.63191))  # the lookup answers at last
+        self.assertEqual(len(requests), 1)
+
+    def test_located_result_cancels_the_watchdog(self):
+        requests = []
+        self.fetcher._start_locate = lambda token: None
+        self.fetcher._request = requests.append
+        self.fetcher.refresh()
+        self.fetcher._located.emit(self.fetcher._token, (-6.17834, 106.63191))
+        self.assertFalse(self.fetcher._locate_watchdog.isActive())
+        self.assertEqual(requests, [Place("-6.18,106.63", "windows", "")])
 
 
 if __name__ == "__main__":

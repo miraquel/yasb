@@ -59,11 +59,12 @@ The forecast follows the laptop. Before each fetch the widget asks Windows locat
 - **Rain coming:** the first wet hour, e.g. `15:00`, or `now` when it is this hour.
 - **Raining now:** the first hour after now that drops below `wet_threshold`, e.g. `18:00`. With no dry hour in the next 24, no time. "Raining now" means WeatherAPI reports precipitation, or a rain, drizzle, shower or thunder-with-rain condition. "Rain possible" does not count.
 - **Dry:** no time.
+- **Rain or thunder "possible"** (WeatherAPI's patchy-rain and thundery-outbreak codes): the icon is a cloud, since nothing is falling yet. The bars still show the chance hour by hour.
 - **No forecast** (none yet, or the last one is over three hours old): every bar is a grey dot, and no time.
 
 ### Location and Privacy
 
-Each refresh tries, in order: a fresh Windows location fix (about 500 m accuracy, up to ten minutes old, a ten-second timeout), then the last fix while under two hours old, then the `location` address. Positions are rounded to two decimals (about 1 km) before they are sent to WeatherAPI. They are kept in memory only, never written to disk, and logged only at DEBUG.
+Each refresh tries, in order: a fresh Windows location fix (about 500 m accuracy, up to ten minutes old, a ten-second timeout), then the last fix while under two hours old, then the `location` address. The last fix covers a lookup that failed, not one you switched off: with Windows location off or denied, the widget uses the `location` address straight away. Positions are rounded to two decimals (about 1 km) before they are sent to WeatherAPI. They are kept in memory only, and never written to disk or to the log.
 
 If Windows location is off, turn it on under **Settings → Privacy & security → Location**, including "Let desktop apps access your location".
 

@@ -69,20 +69,28 @@ def parse_forecast(payload: dict, fetched_at: float) -> Forecast | None:
             )
             for day in days
         )
-        alerts = tuple(
-            a.get("headline", "") for a in (payload.get("alerts") or {}).get("alert") or () if a.get("headline")
-        )
         return Forecast(
             str(location["name"]),
             float(location["lat"]),
             float(location["lon"]),
             current,
             parsed_days,
-            alerts,
+            _alerts(payload.get("alerts")),
             fetched_at,
         )
-    except KeyError, TypeError, ValueError:
+    except KeyError, TypeError, ValueError, AttributeError:
+        # An exception escaping here would reach a Qt slot, and YASB's excepthook exits the bar.
         return None
+
+
+def _alerts(block: object) -> tuple[str, ...]:
+    """Alert headlines. Alerts are optional, so a block of an unexpected shape is just none."""
+    items = block.get("alert") if isinstance(block, dict) else None
+    if not isinstance(items, list):
+        return ()
+    return tuple(
+        a["headline"] for a in items if isinstance(a, dict) and isinstance(a.get("headline"), str) and a["headline"]
+    )
 
 
 def hours_from(forecast: Forecast, now: datetime, count: int) -> list[Hour]:

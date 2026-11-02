@@ -20,8 +20,11 @@ from core.widgets.services.weather.api import CACHE_CONTROL, HEADER
 
 API_URL = "https://api.weatherapi.com/v1/forecast.json"
 RETRY_MS = 60_000  # the card's copy promises "Trying again every minute"
-BUSY_TIMEOUT_S = 30  # a lookup or request older than this no longer blocks the next refresh
+# A lookup the watchdog cut off (15 s) plus a request at its transfer timeout (20 s) still ends
+# before the next refresh may start, so an older reply can never land after a newer one.
+LOCATE_TIMEOUT_MS = 15_000
 TRANSFER_TIMEOUT_MS = 20_000
+BUSY_TIMEOUT_S = 40  # a lookup or request older than this no longer blocks the next refresh
 
 
 def build_url(api_key: str, query: str) -> str:
@@ -32,7 +35,7 @@ def build_url(api_key: str, query: str) -> str:
 class LocalWeatherFetcher(QObject):
     finished = pyqtSignal(dict, object)  # the payload, and the Place it is for
     failed = pyqtSignal(object)  # the Place that was tried
-    _located = pyqtSignal(object)  # a LocateResult, handed back from the lookup thread
+    _located = pyqtSignal(int, object)  # (lookup token, LocateResult) from the lookup thread
 
     def __init__(
         self,
@@ -47,6 +50,7 @@ class LocalWeatherFetcher(QObject):
         self._tracker = tracker
         self._locate = locate
         self._busy_since: float | None = None
+        self._token = 0  # the current lookup; a late answer from an older one is dropped
         self._requests: dict[QNetworkReply, Place] = {}
 
         self._manager = QNetworkAccessManager(self)
@@ -59,6 +63,12 @@ class LocalWeatherFetcher(QObject):
         self._retry_timer.setSingleShot(True)
         self._retry_timer.setInterval(RETRY_MS)
         self._retry_timer.timeout.connect(self.refresh)
+        # WinRT's own timeout only covers its async wait; a call that blocks outright never
+        # answers, so the GUI side gives up on it and falls back as "no fix".
+        self._locate_watchdog = QTimer(self)
+        self._locate_watchdog.setSingleShot(True)
+        self._locate_watchdog.setInterval(LOCATE_TIMEOUT_MS)
+        self._locate_watchdog.timeout.connect(self._on_locate_timeout)
 
     def start(self) -> None:
         self.refresh()
@@ -69,9 +79,11 @@ class LocalWeatherFetcher(QObject):
         if self._busy_since is not None and now - self._busy_since < BUSY_TIMEOUT_S:
             return
         self._busy_since = now
-        self._start_locate()
+        self._token += 1
+        self._locate_watchdog.start()
+        self._start_locate(self._token)
 
-    def _start_locate(self) -> None:
+    def _start_locate(self, token: int) -> None:
         def run() -> None:
             try:
                 result = self._locate()
@@ -79,14 +91,24 @@ class LocalWeatherFetcher(QObject):
                 logging.warning("Local weather: location lookup raised %s", type(e).__name__)
                 result = "no_fix"
             try:
-                self._located.emit(result)
+                self._located.emit(token, result)
             except RuntimeError:
                 pass  # the widget went away while Windows was answering
 
         threading.Thread(target=run, name="LocalWeatherLocate", daemon=True).start()
 
-    def _on_located(self, result: LocateResult) -> None:
-        place = self._tracker.resolve(result, time.time())
+    def _on_locate_timeout(self) -> None:
+        logging.warning("Local weather: Windows location did not answer in time")
+        self._on_located(self._token, "no_fix")
+
+    def _on_located(self, token: int, result: LocateResult) -> None:
+        if token != self._token:
+            return  # an older lookup, already given up on
+        self._token += 1  # this lookup is answered; anything later from it is dropped
+        self._locate_watchdog.stop()
+        self._request(self._tracker.resolve(result, time.time()))
+
+    def _request(self, place: Place) -> None:
         request = QNetworkRequest(QUrl(build_url(self._api_key, place.query)))
         request.setRawHeader(*HEADER)
         request.setRawHeader(*CACHE_CONTROL)

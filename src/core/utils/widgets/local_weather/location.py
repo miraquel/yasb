@@ -44,12 +44,16 @@ class LocationTracker:
         self.last: Fix | None = None
 
     def resolve(self, result: LocateResult, now: float) -> Place:
+        # The position itself is never logged, not even at DEBUG: with `debug: true` it would
+        # land in yasb.log, on disk.
         if isinstance(result, tuple):
             self.last = round_fix(*result, now)
-            place = self._windows(self.last)
-            logging.debug("Local weather: Windows location %s", place.query)
-            return place
-        if self.last is not None and now - self.last.at < REUSE_S:
+            logging.debug("Local weather: using a fresh Windows location fix")
+            return self._windows(self.last)
+        if result == "off":
+            # Switched off or denied: stop using the old position too, not just new ones.
+            self.last = None
+        elif self.last is not None and now - self.last.at < REUSE_S:
             logging.debug("Local weather: no fresh fix (%s), reusing the last one", result)
             return self._windows(self.last)
         logging.warning("Local weather: no Windows location (%s), using the config address", result)

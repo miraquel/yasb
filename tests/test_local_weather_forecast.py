@@ -41,6 +41,16 @@ class ParseTests(unittest.TestCase):
             with self.subTest(data=list(data)):
                 self.assertIsNone(parse_forecast(data, 0.0))
 
+    def test_malformed_alerts_are_ignored(self):
+        """An escaped exception here would reach a Qt slot, and YASB's excepthook exits the bar."""
+        for alerts in (["oops"], {"alert": ["oops"]}, {"alert": "oops"}, "oops"):
+            with self.subTest(alerts=alerts):
+                data = payload(rain(13, [70]))
+                data["alerts"] = alerts
+                f = parse_forecast(data, 0.0)
+                self.assertIsNotNone(f)
+                self.assertEqual(f.alerts, ())
+
     def test_day_with_no_hours_parses_empty(self):
         data = payload()
         data["forecast"]["forecastday"][2]["hour"] = []
@@ -90,6 +100,14 @@ class ConditionTests(unittest.TestCase):
         for (code, day), cls in expected.items():
             with self.subTest(code=code, day=day):
                 self.assertEqual(condition_class(condition(code, day)[0]), cls)
+
+    def test_possible_rain_shows_a_cloud(self):
+        """'Patchy rain possible' isn't rain falling; a rain icon over a dry strip needs decoding."""
+        for code in (1063, 1087):
+            with self.subTest(code=code):
+                self.assertEqual(condition(code, True)[0], "cloudyDay")
+                self.assertEqual(condition(code, False)[0], "cloudyNight")
+                self.assertEqual(condition_class(condition(code, True)[0]), "cloud")
 
     def test_wmo_mapping(self):
         table = {
