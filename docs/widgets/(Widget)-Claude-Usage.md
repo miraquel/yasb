@@ -104,6 +104,7 @@ The [Example Style](#example-style) section has rules for every part of the popu
 | `token_history`   | dict    | `{'enabled': false, ...}` | Optional local token-usage history. See [Token history](#token-history). |
 | `status`          | dict    | `{'enabled': false, ...}` | Optional Claude API status indicator. See [API status](#api-status). |
 | `progress_bar`    | dict    | `{'enabled': false, ...}` | Optional progress bar on the bar itself. See [Progress bar](#progress-bar). |
+| `gauge`           | dict    | `{'enabled': false, 'animation': true}` | Optional fill behind the label, the widget as its own gauge. See [Fill gauge](#fill-gauge). |
 | `tooltip`         | boolean | `true` | Whether to show a summary tooltip on hover. |
 | `warn_percent`    | integer | `60` | Utilization at which bars, percentages and the ring turn from `low` to `medium` (green to yellow). |
 | `crit_percent`    | integer | `85` | Utilization at which they turn `high` (red). Also where Clawd starts sweating. |
@@ -171,6 +172,13 @@ following placeholders can be used in `label` / `label_alt`:
   currently selects. These are the ones the `toggle_usage_mode` callback flips.
 - `{mode}` - the word for the current mode (`mode_label_used` / `mode_label_remaining`), so a
   label like `{five_hour_value}% {mode}` reads `30% used` or `70% left` and is never ambiguous.
+- `{gauge_value}` - the number of the window the [fill gauge](#fill-gauge) shows, following
+  `usage_mode`: the 5-hour window, until the 7-day window reaches `crit_percent`, when the week
+  takes over. In `label_alt` (after `toggle_label`) it is the other window. Works whether or not
+  the gauge is enabled.
+- `{gauge_window}` - `7d` while the week is the window `{gauge_value}` shows, empty otherwise.
+  Put it in its own `<span>` so it hides when empty (e.g.
+  `<span class='window'>{gauge_window}</span>{gauge_value}%`).
 - `{five_hour_reset}` - time until the 5-hour window resets. Shown as a countdown when under a
   day away (e.g. `4h 27m`), otherwise as a local weekday + time (e.g. `Sat 6:00 AM`).
 - `{seven_day_reset}` - time until the 7-day window resets (e.g. `Sat 6:00 AM`).
@@ -360,6 +368,69 @@ bar is the inverse, because that widget reports remaining rather than used.)
 - **animation:** Animate value changes rather than jumping.
 - **level_colors:** Optional `low` / `medium` / `high` colours. When set, the ring switches
   between them at `warn_percent` / `crit_percent` (a traffic light) instead of keeping `color`.
+
+## Fill gauge
+
+The widget itself becomes the gauge. It fills from its left edge like a tank, behind the label,
+to the share used of the window `{gauge_value}` shows. A 2px line along its bottom edge carries
+the other window. The 5-hour window drives the fill until the 7-day window reaches
+`crit_percent`. The week is then what will actually lock you out, so it takes the fill and the
+number, `{gauge_window}` reads `7d`, and the 5 hours drop to the line. Per-model weekly caps
+(see above) never take over: hitting one locks out that model, not you, and they stay in the
+popup.
+
+- **Colour:** the fill, the line and the number each step by their own window's consumption:
+  `low` below `warn_percent`, `medium` from it, `high` from `crit_percent`. In `remaining` mode
+  the fill drains instead of filling, but the colour still comes from consumption, so red always
+  means close to the limit.
+- **No reading:** no fill and no line, so a missing reading never looks like a healthy 0%. A cached
+  reading whose window has already reset (an expired token serves the last record) counts as none:
+  `{gauge_value}` reads `--` until a fresh one arrives.
+- **Right-click** (`toggle_label`) swaps the two windows, so the fill always matches the number
+  on screen.
+
+```yaml
+    gauge:
+      enabled: true
+      animation: true   # slide to a new reading over 400ms, as the ring does
+    progress_bar:
+      enabled: false    # the fill replaces the ring
+```
+
+The gauge paints *beneath* the widget's `.widget-container`, so give the container a transparent
+background (the pill surface then comes from whatever is behind it, e.g. a grouper's
+`.container`). Its look comes from these `-qproperty-` values on `.claude-usage .gauge`. Qt reads
+them once, when the widget is polished, so editing them needs a full restart:
+
+| Property | Default | Meaning |
+|---|---|---|
+| `lowcolor` / `mediumcolor` / `highcolor` | `#fab387` / `#f9e2af` / `#f38ba8` | Hue per step, for the fill, its edge and the line |
+| `lowalpha` / `mediumalpha` / `highalpha` | `20` / `24` / `30` | Fill opacity per step, in percent |
+| `edgealpha` | `45` | Opacity of the 1px edge line where the fill ends |
+| `lineheight` | `2` | Height of the bottom line, in px; it is drawn opaque |
+| `leftradius` / `rightradius` | `8` / `8` | Corner radii the fill and the line are clipped to. The line's share is measured from where the left curve ends, so a small share still shows past it |
+
+```css
+.claude-usage .widget-container {
+    background-color: transparent;
+}
+.claude-usage .gauge {
+    -qproperty-lowcolor: #fab387;
+    -qproperty-mediumcolor: #f9e2af;
+    -qproperty-highcolor: #f38ba8;
+    -qproperty-lowalpha: 20;
+    -qproperty-mediumalpha: 24;
+    -qproperty-highalpha: 30;
+    -qproperty-edgealpha: 45;
+    -qproperty-lineheight: 2;
+    -qproperty-leftradius: 8;
+    -qproperty-rightradius: 8;
+}
+.claude-usage .window {
+    color: #a6adc8;   /* the "7d" prefix */
+    padding-right: 4px;
+}
+```
 
 ## Clawd, sessions, hearts and footer
 

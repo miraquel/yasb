@@ -150,6 +150,7 @@ codex_usage:
 | `hearts` | dictionary | `{'enabled': false, 'scale': 1.35}` | Pixel hearts in the popup header. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
 | `footer` | dictionary | `{'enabled': false, ...}` | Plan, account and freshness line closing the popup. See [Pet, sessions, hearts and footer](#pet-sessions-hearts-and-footer). |
 | `progress_bar` | dictionary | [See below](#example-configuration) | Native bar indicator showing the active window's remaining percentage. |
+| `gauge` | dictionary | `{'enabled': false, 'animation': true}` | Optional fill behind the label, the widget as its own gauge. See [Fill gauge](#fill-gauge). |
 | `keybindings` | list | `[]` | Optional hotkeys. See [Keybindings](./Keybindings). |
 | `callbacks` | dictionary | [See below](#callbacks) | Mouse actions. |
 | `menu` | dictionary | [See below](#example-configuration) | Popup position, appearance, section visibility, and Fluent navigation icons. `icon` takes a path to an image drawn at 22x22 at the left of the popup header, beside the title and account line; any format Qt can read works, and an empty value leaves the header unmarked. |
@@ -240,6 +241,13 @@ but are marked as unavailable rather than incorrectly displayed as zero usage.
   selects. These are the ones the `toggle_usage_mode` callback flips.
 - `{mode}` - the word for the current mode (`mode_label_used` / `mode_label_remaining`), so a
   label like `{primary_value}% {mode}` reads `97% left` or `3% used` and is never ambiguous.
+- `{gauge_value}` - the number of the window the [fill gauge](#fill-gauge) shows, following
+  `usage_mode`. With one window (a plan reporting only a weekly limit) that window, in both
+  labels. With two, the shorter until the longer reaches `crit_percent`, and the other one in
+  `label_alt`. Works whether or not the gauge is enabled. Its label gets the `.good` / `.low` /
+  `.critical` / `.unknown` class of that window, so the number can escalate with the fill.
+- `{gauge_window}` - the longer window's name (e.g. `1w`) while it is the one `{gauge_value}`
+  shows, empty otherwise. Put it in its own `<span>` so it hides when empty.
 - `{primary_used}` / `{secondary_used}` - percentage already used.
 - `{primary_window}` / `{secondary_window}` - duration reported by Codex, such as `5h`, `7d`, or `1w`.
 - `{primary_reset}` / `{secondary_reset}` - time until reset.
@@ -255,6 +263,24 @@ but are marked as unavailable rather than incorrectly displayed as zero usage.
 Window names are deliberately derived from `windowDurationMins` instead of assuming that every
 account has a 5-hour and weekly limit. Missing secondary limits render as `--` and are omitted
 from the popup.
+
+## Fill gauge
+
+The same fill as the Claude widget's: the widget fills from its left edge to the share used of
+the window `{gauge_value}` shows, a 2px line along the bottom carries the other window when
+there is one, and the colour steps by consumption at `warn_percent` / `crit_percent`. It paints
+beneath `.widget-container`, which needs a transparent background, and takes its look from
+`-qproperty-` values on `.codex-usage .gauge`. The property table and an example are in the
+Claude widget's [Fill gauge](./(Widget)-Claude-Usage.md#fill-gauge) section. For a teal Codex
+fill set `-qproperty-lowcolor: #94e2d5`.
+
+```yaml
+    gauge:
+      enabled: true
+      animation: true
+    progress_bar:
+      enabled: false
+```
 
 ## Widget Style
 

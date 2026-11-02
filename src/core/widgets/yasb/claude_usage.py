@@ -26,6 +26,8 @@ from core.utils.utilities import (
     build_progress_widget,
     refresh_widget_style,
 )
+from core.utils.widgets.ai_usage.gauge import GaugeReading, GaugeWindow, pick, share, step
+from core.utils.widgets.ai_usage.gauge_view import UsageGauge
 from core.utils.widgets.ai_usage.hearts import heart_halves
 from core.utils.widgets.ai_usage.scene import HeartsView, SkyScene
 from core.utils.widgets.ai_usage.sky import apply_sky_settings
@@ -197,6 +199,10 @@ class ClaudeUsageWidget(BaseWidget):
         if self.progress_widget:
             position = 0 if self.config.progress_bar.position == "left" else self._widget_container_layout.count()
             self._widget_container_layout.insertWidget(position, self.progress_widget)
+        # The fill behind the pill (optional), beneath the container so its labels paint over it.
+        self._gauge: UsageGauge | None = None
+        if self.config.gauge.enabled:
+            self._gauge = UsageGauge(self._widget_frame, self._widget_container, self.config.gauge.animation)
 
         self.register_callback("toggle_label", self._toggle_label)
         self.register_callback("toggle_menu", self._toggle_menu)
@@ -402,7 +408,11 @@ class ClaudeUsageWidget(BaseWidget):
 
     def _format_values(self) -> dict[str, str]:
         totals = self._token_summary.get("totals", {})
+        gauge = self._gauge_reading()
         return {
+            # The window the fill shows, and its name while that is the week (see _gauge_reading).
+            "gauge_value": self._mode_value(gauge.fill.used if gauge.fill else None),
+            "gauge_window": gauge.prefix,
             "five_hour": self._pct(self._data.get("five")),
             "seven_day": self._pct(self._data.get("seven")),
             # Explicit pair, unaffected by usage_mode.
@@ -718,6 +728,12 @@ class ClaudeUsageWidget(BaseWidget):
                 base = current_widget.property("class") or "label"
                 base = " ".join(t for t in base.split() if t not in _LEVELS)
                 current_widget.setProperty("class", f"{base} {self._level_class(self._data.get('five'))}")
+            if "{gauge_" in part:
+                # The level of whichever window the fill shows, so the number and the fill agree.
+                base = current_widget.property("class") or "label"
+                base = " ".join(t for t in base.split() if t not in _LEVELS)
+                fill = self._gauge_reading().fill
+                current_widget.setProperty("class", f"{base} {self._level_class(fill.used if fill else None)}")
             if self.config.tooltip:
                 # Spell out both sides here regardless of usage_mode, so the hover always
                 # answers the question the bar's single number cannot.
@@ -735,6 +751,39 @@ class ClaudeUsageWidget(BaseWidget):
                 set_tooltip(current_widget, tip)
         refresh_widget_style(*active_widgets)
         self._sync_progress_bar()
+        self._sync_gauge()
+
+    def _gauge_reading(self) -> GaugeReading:
+        """Which window the fill and the number show: the 5 hours until the week reaches crit_percent,
+        the other one while the right-click label is up. Per-model weekly caps stay in the popup:
+        hitting one locks out that model, not you."""
+        now = time.time()
+
+        def current(key: str) -> Any:
+            # An expired token serves the cached record; once a window has reset, its old share
+            # says nothing about now and would pass for a live reading, so it counts as none.
+            reset = self._epoch(self._data.get(f"{key}_reset_iso"))
+            return None if reset is not None and reset <= now else self._data.get(key)
+
+        return pick(
+            GaugeWindow("5h", current("five")),
+            GaugeWindow("7d", current("seven")),
+            self.config.crit_percent,
+            self._show_alt_label,
+        )
+
+    def _sync_gauge(self) -> None:
+        """Hand the gauge its shares, which follow usage_mode, and its steps, which always come from
+        consumption, so red means close to the limit whichever way the fill runs."""
+        if self._gauge is None:
+            return
+        reading = self._gauge_reading()
+        fill = reading.fill.used if reading.fill else None
+        line = reading.line.used if reading.line else None
+        warn, crit = self.config.warn_percent, self.config.crit_percent
+        self._gauge.set_reading(
+            share(fill, self._usage_mode), step(fill, warn, crit), share(line, self._usage_mode), step(line, warn, crit)
+        )
 
     def _sync_progress_bar(self) -> None:
         """Drive the optional bar-level progress ring from the window the label is showing.
