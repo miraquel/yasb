@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import Field, model_validator
 
@@ -43,6 +43,8 @@ class VSCodeConfig(CustomBaseModel):
     state_storage_path: str = ""
     modified_date_format: str = "Date modified: %Y-%m-%d %H:%M"
     cli_command: str = "code"
+    menu_layout: Literal["list", "sections"] = "list"
+    new_window: bool = False
     menu: VSCodeMenuConfig = VSCodeMenuConfig()
     keybindings: list[KeybindingConfig] = []
     callbacks: CallbacksVSCodeConfig = CallbacksVSCodeConfig()

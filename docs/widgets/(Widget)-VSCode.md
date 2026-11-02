@@ -14,6 +14,8 @@ Shows a list of your recently opened projects in Visual Studio Code. It opens a 
 | `state_storage_path` | string | `''` | Absolute path to the folder containing editor data, examples are shown below. |
 | `modified_date_format` | string | `'Date modified: %Y-%m-%d %H:%M'` | The format for the modified date of the files and folders. |
 | `cli_command` | string | `'code'` | The CLI command to execute when a workspace is clicked, doesn't need to contain folder name. For example, `code`, `windsurf`. |
+| `menu_layout` | string | `'list'` | `'list'` shows one filterable, searchable list. `'sections'` shows a "Projects" section (folders) and a "Recent files" section, with each project's name on top. |
+| `new_window` | bool | `false` | Open every workspace in a new VS Code window (`--new-window`). |
 | `menu`              | dict    | [See below](#menu-options) | Menu settings for the widget. |
 | `keybindings` | list | `[]` | Optional hotkeys. See [Keybindings](./Keybindings). |
 | `callbacks` | dict | [See below](#callbacks) | Callbacks for mouse events on the widget. |
@@ -70,6 +72,8 @@ vscode:
       max_number_of_files: 50 # set to 0 if you only want folders
       modified_date_format: "Date modified: %Y-%m-%d %H:%M"
       cli_command: "code" # or "codium" or "windsurf" or any other CLI command to open the workspace
+      menu_layout: "list" # or "sections"
+      new_window: false
       menu:
         blur: true
         round_corners: true
@@ -91,8 +95,15 @@ vscode:
 - **state_storage_path:** Absolute path to the folder containing editor data. For example, `C:\Users\user\.vscode-shared\sharedStorage\state.vscdb` for Visual Studio Code, `C:\Users\user\AppData\Roaming\Windsurf\User\globalStorage\state.vscdb` for Windsurf, etc. If left empty, it will use the default VSCode path.
 - **modified_date_format:** The date format for the modified date of the files and folders. It uses Python's `strftime` format. For example, '%Y-%m-%d %H:%M' for `2025-06-01 12:00`.
 - **cli_command:** The cli command to execute when a workspace is clicked, doesn't need to contain folder name. For example, `code`, `windsurf`.
+- **menu_layout:** How the popup lists your recents.
+  - `list` (default): one list of full paths with the modified date, filter buttons (All / Folders / Files / Remotes) and a search box.
+  - `sections`: a "Projects" section with your recent folders, then a "Recent files" section, both in the order VS Code last opened them. A folder row shows the folder's name on top and the path it lives in underneath; a long path is shortened from the left, so the end stays visible. Remote folders show the connection (`WSL (Ubuntu)`, `SSH (host)`, `Dev Container`) instead of a path. A file row shows the file name and the folder it sits in. An empty section is left out. There are no filters, search box or dates in this layout.
+- **new_window:** Open every workspace in a new VS Code window instead of reusing one. In the `sections` layout the header also says "opens in a new window".
 - **keybindings:** A list of global hotkeys for this widget. See [Keybindings](./Keybindings).
 - **callbacks:** Mouse event callbacks. See [Callbacks](#callbacks).
+
+> [!NOTE]
+> If YASB runs elevated (for example from the scheduled task created with "run with highest privileges"), the widget asks the Windows desktop shell to start VS Code, so VS Code opens with your normal, non-administrator rights. When `cli_command` resolves to VS Code's `bin\code.cmd`, the widget starts `Code.exe` directly so no console window flashes. If the desktop shell cannot be reached, VS Code is started the usual way and a warning is logged.
 
 ## Widget Style
 ```css
@@ -116,6 +127,17 @@ vscode:
 .vscode-menu .contents .item .file-icon {}
 .vscode-menu .contents .item .remote-icon {}
 .vscode-menu .no-recent {}
+ /* Popup menu, sections layout (menu_layout: "sections") */
+.vscode-menu.sections {}
+.vscode-menu.sections .header .hint {}
+.vscode-menu.sections .contents .section-title {}
+.vscode-menu.sections .contents .separator {}
+.vscode-menu.sections .contents .item.folder {}
+.vscode-menu.sections .contents .item.file {}
+.vscode-menu.sections .contents .item.remote {}
+.vscode-menu.sections .contents .item .name {}
+.vscode-menu.sections .contents .item .path {} /* folder rows: parent path or remote connection */
+.vscode-menu.sections .contents .item .parent {} /* file rows: the folder holding the file */
 ```
 
 ## Example Style for the Visual Studio Code Widget
@@ -204,6 +226,107 @@ vscode:
 .vscode-menu .contents .item:hover {
     background-color: rgba(255, 255, 255, 0.1);
     cursor: pointer;
+}
+```
+
+## Example Style for the Sections Layout
+
+```css
+.vscode-menu.sections {
+    min-width: 420px;
+    max-width: 420px;
+    max-height: 640px;
+}
+.vscode-menu.sections .header {
+    background-color: #11111b;
+    border-bottom: 1px solid #313244;
+    padding: 10px 14px;
+}
+.vscode-menu.sections .header .title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #cdd6f4;
+}
+.vscode-menu.sections .header .hint {
+    font-size: 11px;
+    font-weight: 400;
+    color: #7f849c;
+}
+.vscode-menu.sections .contents {
+    background-color: #181825;
+    padding-bottom: 6px;
+}
+.vscode-menu.sections .contents .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: #7f849c;
+    padding: 10px 14px 4px 14px;
+}
+.vscode-menu.sections .contents .separator {
+    background-color: #313244;
+    min-height: 1px;
+    max-height: 1px;
+    margin-top: 6px;
+}
+.vscode-menu.sections .contents .item {
+    padding: 0 14px;
+    border: none;
+}
+.vscode-menu.sections .contents .item.folder {
+    min-height: 46px;
+    max-height: 46px;
+}
+.vscode-menu.sections .contents .item.file {
+    min-height: 34px;
+    max-height: 34px;
+}
+.vscode-menu.sections .contents .item:hover {
+    background-color: #313244;
+}
+.vscode-menu.sections .contents .item .folder-icon,
+.vscode-menu.sections .contents .item .remote-icon {
+    font-family: "Symbols Nerd Font Mono";
+    font-size: 15px;
+    color: #89b4fa;
+    background-color: rgba(137, 180, 250, 0.12);
+    border-radius: 7px;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    margin-right: 12px;
+}
+.vscode-menu.sections .contents .item .file-icon {
+    font-family: "Symbols Nerd Font Mono";
+    font-size: 12px;
+    color: #cba6f7;
+    background-color: rgba(203, 166, 247, 0.10);
+    border-radius: 6px;
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    margin-right: 12px;
+}
+.vscode-menu.sections .contents .item .name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #cdd6f4;
+}
+.vscode-menu.sections .contents .item .path {
+    font-size: 11px;
+    font-weight: 400;
+    color: #7f849c;
+}
+.vscode-menu.sections .contents .item.file .name {
+    font-size: 13px;
+    font-weight: 400;
+}
+.vscode-menu.sections .contents .item .parent {
+    font-size: 11px;
+    font-weight: 400;
+    color: #7f849c;
+    margin-left: 8px;
 }
 ```
 

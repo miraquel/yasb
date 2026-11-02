@@ -1,19 +1,68 @@
 import datetime
-import logging
 import os
 import re
-import subprocess
+import threading
 from functools import partial
+from typing import override
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QMouseEvent
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from core.utils.utilities import ElidedLabel, PopupWidget
 from core.validation.widgets.yasb.vscode import VSCodeConfig
 from core.widgets.base import BaseWidget
 from core.widgets.services.vscode.get_vscode_state_db_path import get_state_db_path
 from core.widgets.services.vscode.history import RecentWorkspace, get_history_modified_time, load_recent_workspaces
+from core.widgets.services.vscode.labels import describe_remote_authority, workspace_row_text
+from core.widgets.services.vscode.launch import launch_vscode
+
+
+class _FileNameLabel(ElidedLabel):
+    """A file name that asks for its full width, so the folder beside it is cut first."""
+
+    def __init__(self, text: str):
+        super().__init__(text)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+
+    @override
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        margins = self.contentsMargins()
+        # ElidedLabel keeps 4px spare, so add it back or the full name would elide by a hair.
+        hint.setWidth(self.fontMetrics().horizontalAdvance(self.text()) + margins.left() + margins.right() + 4)
+        return hint
+
+    @override
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        hint.setWidth(0)
+        return hint
+
+
+class _FitScrollArea(QScrollArea):
+    """Asks for its whole list's height, where QScrollArea caps its hint at about 24 lines.
+
+    The menu's CSS max-height still caps the popup, and the list scrolls past that.
+    """
+
+    @override
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        content = self.widget()
+        if content is not None:
+            hint.setHeight(content.sizeHint().height() + 2 * self.frameWidth())
+        return hint
 
 
 class VSCodeWidget(BaseWidget):
@@ -72,27 +121,12 @@ class VSCodeWidget(BaseWidget):
                 widget_index += 1
 
     def _handle_mouse_press_event(self, event: QMouseEvent | None, workspace_data: RecentWorkspace):
-        path = workspace_data["path"]
-        is_folder = workspace_data["type"] == "folder"
-        is_remote = workspace_data.get("is_remote", False)
-
-        args = [self.config.cli_command]
-        if is_remote:
-            uri_arg = "--folder-uri" if is_folder else "--file-uri"
-            args.extend([uri_arg, path])
-        else:
-            args.append(path)
-
-        try:
-            subprocess.Popen(
-                args,
-                shell=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as e:
-            logging.error("Failed to open VS Code with path %s: %s", path, e)
+        # Off the UI thread: the elevated route waits on Explorer, like shell_open does.
+        threading.Thread(
+            target=launch_vscode,
+            args=(workspace_data, self.config.cli_command, self.config.new_window),
+            daemon=True,
+        ).start()
         if self._menu is not None:
             self._menu.hide()
 
@@ -124,8 +158,12 @@ class VSCodeWidget(BaseWidget):
             self.config.menu.border_color,
             persistent=True,
         )
-        menu.setProperty("class", "vscode-menu")
+        menu.setProperty("class", "vscode-menu sections" if self._sections_layout else "vscode-menu")
         return menu
+
+    @property
+    def _sections_layout(self) -> bool:
+        return self.config.menu_layout == "sections"
 
     def _init_menu_layout(self):
         self._menu_layout = QVBoxLayout(self._menu)
@@ -144,30 +182,16 @@ class VSCodeWidget(BaseWidget):
 
         header_layout.addStretch()
 
-        self._pill_buttons: dict[str, QPushButton] = {}
-        for filter_name in ("all", "folders", "files", "remotes"):
-            btn = QPushButton(filter_name.title())
-            btn.setProperty("class", "filter-button active" if filter_name == self._active_filter else "filter-button")
-            btn.clicked.connect(partial(self._set_filter, filter_name))
-            header_layout.addWidget(btn)
-            self._pill_buttons[filter_name] = btn
-
-        self._menu_layout.addWidget(header_widget)
-
-        search_bar = QFrame()
-        search_bar.setProperty("class", "search-bar")
-        search_bar_layout = QHBoxLayout(search_bar)
-        search_bar_layout.setContentsMargins(0, 0, 0, 0)
-        search_bar_layout.setSpacing(0)
-
-        self._search_input = QLineEdit()
-        self._search_input.setProperty("class", "input")
-        self._search_input.setPlaceholderText("Search...")
-        self._search_input.setClearButtonEnabled(True)
-        self._search_input.textChanged.connect(self._on_search_changed)
-        search_bar_layout.addWidget(self._search_input)
-
-        self._menu_layout.addWidget(search_bar)
+        if self._sections_layout:
+            if self.config.new_window:
+                hint_label = QLabel("opens in a new window")
+                hint_label.setProperty("class", "hint")
+                header_layout.addWidget(hint_label)
+            self._menu_layout.addWidget(header_widget)
+        else:
+            search_bar = self._init_filters_and_search(header_layout)
+            self._menu_layout.addWidget(header_widget)
+            self._menu_layout.addWidget(search_bar)
 
         self._scroll_area = self._create_scroll_area()
         self._menu_layout.addWidget(self._scroll_area)
@@ -191,6 +215,31 @@ class VSCodeWidget(BaseWidget):
 
         self._scroll_area.setWidget(self._scroll_widget)
 
+    def _init_filters_and_search(self, header_layout: QHBoxLayout) -> QFrame:
+        """Add the list layout's filter buttons to the header, and return its search bar."""
+        self._pill_buttons: dict[str, QPushButton] = {}
+        for filter_name in ("all", "folders", "files", "remotes"):
+            btn = QPushButton(filter_name.title())
+            btn.setProperty("class", "filter-button active" if filter_name == self._active_filter else "filter-button")
+            btn.clicked.connect(partial(self._set_filter, filter_name))
+            header_layout.addWidget(btn)
+            self._pill_buttons[filter_name] = btn
+
+        search_bar = QFrame()
+        search_bar.setProperty("class", "search-bar")
+        search_bar_layout = QHBoxLayout(search_bar)
+        search_bar_layout.setContentsMargins(0, 0, 0, 0)
+        search_bar_layout.setSpacing(0)
+
+        self._search_input = QLineEdit()
+        self._search_input.setProperty("class", "input")
+        self._search_input.setPlaceholderText("Search...")
+        self._search_input.setClearButtonEnabled(True)
+        self._search_input.textChanged.connect(self._on_search_changed)
+        search_bar_layout.addWidget(self._search_input)
+
+        return search_bar
+
     def _set_filter(self, filter_name: str, checked: bool = False):
         self._active_filter = filter_name
 
@@ -208,7 +257,7 @@ class VSCodeWidget(BaseWidget):
         self._refresh_menu_items(reload_db=False)
 
     def _create_scroll_area(self):
-        scroll_area = QScrollArea()
+        scroll_area = _FitScrollArea() if self._sections_layout else QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setViewportMargins(0, 0, -4, 0)
@@ -230,6 +279,21 @@ class VSCodeWidget(BaseWidget):
         no_recent_label.setContentsMargins(0, 20, 0, 20)
         return no_recent_label
 
+    def _create_icon_label(self, workspace_data: RecentWorkspace) -> QLabel | None:
+        """The row's icon (remote, folder or file), or None when that icon is set to ""."""
+        if workspace_data.get("is_remote", False) and self.config.icons.remote:
+            icon_char, icon_class = self.config.icons.remote, "remote-icon"
+        elif workspace_data["type"] == "folder":
+            icon_char, icon_class = self.config.icons.folder, "folder-icon"
+        else:
+            icon_char, icon_class = self.config.icons.file, "file-icon"
+
+        if not icon_char:
+            return None
+        icon_label = QLabel(icon_char)
+        icon_label.setProperty("class", icon_class)
+        return icon_label
+
     def _create_workspace_item(self, workspace_data: RecentWorkspace) -> QFrame:
         container = QFrame()
         container.setProperty("class", "item")
@@ -239,25 +303,10 @@ class VSCodeWidget(BaseWidget):
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
 
-        is_folder = workspace_data["type"] == "folder"
         is_remote = workspace_data.get("is_remote", False)
 
-        icon_char = ""
-        icon_class = ""
-
-        if is_remote and self.config.icons.remote:
-            icon_char = self.config.icons.remote
-            icon_class = "remote-icon"
-        elif is_folder:
-            icon_char = self.config.icons.folder
-            icon_class = "folder-icon"
-        else:
-            icon_char = self.config.icons.file
-            icon_class = "file-icon"
-
-        if icon_char:
-            icon_label = QLabel(icon_char)
-            icon_label.setProperty("class", icon_class)
+        icon_label = self._create_icon_label(workspace_data)
+        if icon_label is not None:
             container_layout.addWidget(icon_label)
 
         path = workspace_data["path"]
@@ -280,21 +329,7 @@ class VSCodeWidget(BaseWidget):
         title_label.setProperty("class", "title")
 
         if is_remote:
-            authority = workspace_data.get("remote_authority", "")
-            if authority:
-                auth_lower = authority.lower()
-                if auth_lower.startswith("wsl+"):
-                    distro = authority[4:]
-                    date_str = f"WSL ({distro})" if distro else "WSL Connection"
-                elif auth_lower.startswith("ssh-remote+"):
-                    host = authority[11:]
-                    date_str = f"SSH ({host})" if host else "SSH Connection"
-                elif auth_lower.startswith("dev-container+"):
-                    date_str = "Dev Container"
-                else:
-                    date_str = f"Remote: {authority}"
-            else:
-                date_str = "Remote Connection"
+            date_str = describe_remote_authority(workspace_data.get("remote_authority"))
         else:
             try:
                 mod_time = os.path.getmtime(path)
@@ -319,7 +354,93 @@ class VSCodeWidget(BaseWidget):
 
         return container
 
+    def _create_section_row(self, workspace_data: RecentWorkspace) -> QFrame:
+        """A row of the sections layout: name over parent path (folders) or name beside folder (files)."""
+        is_folder = workspace_data["type"] == "folder"
+        name, detail = workspace_row_text(workspace_data)
+
+        row = QFrame()
+        row_classes = ["item", "folder" if is_folder else "file"]
+        if workspace_data.get("is_remote", False):
+            row_classes.append("remote")
+        row.setProperty("class", " ".join(row_classes))
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(0)
+
+        icon_label = self._create_icon_label(workspace_data)
+        if icon_label is not None:
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            row_layout.addWidget(icon_label)
+
+        if is_folder:
+            name_label = ElidedLabel(name)
+            name_label.setProperty("class", "name")
+            path_label = ElidedLabel(detail, elide_mode=Qt.TextElideMode.ElideLeft)
+            path_label.setProperty("class", "path")
+            if not detail:  # a drive root has no parent path; never setVisible(True) an unparented label
+                path_label.hide()
+
+            text_column = QWidget()
+            text_layout = QVBoxLayout(text_column)
+            text_layout.setContentsMargins(0, 0, 0, 0)
+            text_layout.setSpacing(0)
+            text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+            text_layout.addWidget(name_label)
+            text_layout.addWidget(path_label)
+            row_layout.addWidget(text_column, 1)
+        else:
+            name_label = _FileNameLabel(name)
+            name_label.setProperty("class", "name")
+            parent_label = ElidedLabel(detail)
+            parent_label.setProperty("class", "parent")
+            row_layout.addWidget(name_label)
+            row_layout.addWidget(parent_label, 1)
+
+        self._bind_container_mouse_press(row, workspace_data)
+        return row
+
+    def _refresh_sections(self):
+        """Rebuild the sections layout: Projects (folders), then Recent files, in VS Code's order."""
+        for widget in self._item_widgets:
+            widget.deleteLater()
+        self._item_widgets.clear()
+
+        recent_workspaces = load_recent_workspaces(self._state_file_path)
+        folders = [ws for ws in recent_workspaces if ws["type"] == "folder"][: self.config.max_number_of_folders]
+        files = [ws for ws in recent_workspaces if ws["type"] == "file"][: self.config.max_number_of_files]
+        self._recent_workspaces = folders + files
+
+        def add(widget: QFrame) -> None:
+            self._items_layout.addWidget(widget)
+            self._item_widgets.append(widget)
+            # A polished popup skips children added later, so polish now (with its ancestors in
+            # place) or its CSS size only lands after the menu has sized itself.
+            widget.ensurePolished()
+
+        for title, workspaces in (("Projects", folders), ("Recent files", files)):
+            if not workspaces:
+                continue
+            if self._item_widgets:
+                separator = QFrame()
+                separator.setProperty("class", "separator")
+                add(separator)
+            title_label = QLabel(title)
+            title_label.setProperty("class", "section-title")
+            add(title_label)
+            for workspace in workspaces:
+                add(self._create_section_row(workspace))
+
+        if self._no_recents_widget is not None:
+            self._no_recents_widget.setVisible(not self._recent_workspaces)
+
     def _refresh_menu_items(self, reload_db: bool = True):
+        if self._sections_layout:
+            self._refresh_sections()
+            if self._menu is not None:
+                self._menu.adjustSize()
+            return
+
         if reload_db:
             for widget in self._item_widgets:
                 widget.deleteLater()
