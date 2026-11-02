@@ -31,6 +31,12 @@ class NetworkData(TypedDict):
     download_speed: str
     raw_upload_speed: str
     raw_download_speed: str
+    upload_compact_value: str
+    upload_compact_unit: str
+    download_compact_value: str
+    download_compact_unit: str
+    upload_bytes_per_sec: float
+    download_bytes_per_sec: float
     today_uploaded: str
     today_downloaded: str
     session_uploaded: str
@@ -261,6 +267,13 @@ class TrafficDataManager:
             raw_upload_speed = cls.format_speed(upload_speed_per_sec, speed_unit, False, upload_threshold)
             raw_download_speed = cls.format_speed(download_speed_per_sec, speed_unit, False, download_threshold)
 
+            upload_compact_value, upload_compact_unit = cls.format_speed_compact(
+                upload_speed_per_sec, speed_unit, upload_threshold
+            )
+            download_compact_value, download_compact_unit = cls.format_speed_compact(
+                download_speed_per_sec, speed_unit, download_threshold
+            )
+
             # Get today totals
             today_sent, today_recv = cls.get_today_totals(interface)
             today_uploaded = cls.format_data_size(today_sent)
@@ -285,6 +298,14 @@ class TrafficDataManager:
                 "download_speed": cls._apply_alignment(download_speed, max_label_length, max_label_length_align),
                 "raw_upload_speed": raw_upload_speed,
                 "raw_download_speed": raw_download_speed,
+                # Fixed width already; max_label_length alignment would only pad them further.
+                "upload_compact_value": upload_compact_value,
+                "upload_compact_unit": upload_compact_unit,
+                "download_compact_value": download_compact_value,
+                "download_compact_unit": download_compact_unit,
+                # Unformatted bytes/s, for the sparkline.
+                "upload_bytes_per_sec": float(upload_speed_per_sec),
+                "download_bytes_per_sec": float(download_speed_per_sec),
                 "today_uploaded": cls._apply_alignment(today_uploaded, max_label_length, max_label_length_align),
                 "today_downloaded": cls._apply_alignment(today_downloaded, max_label_length, max_label_length_align),
                 "session_uploaded": cls._apply_alignment(session_uploaded, max_label_length, max_label_length_align),
@@ -563,3 +584,29 @@ class TrafficDataManager:
                 return f"{bits_per_sec:.{decimal_places}f} bps"
             else:
                 return "0 bps"
+
+    @classmethod
+    def format_speed_compact(
+        cls, bytes_per_sec: float, speed_unit: str = "bits", threshold: float = 0
+    ) -> tuple[str, str]:
+        """Speed as a value of at most three characters and a unit letter, e.g. (" 23", "M").
+
+        The value is right-justified to three characters so a label keeps its width as the speed
+        changes, and it rolls over to the next unit before it would need a fourth digit.
+        """
+        if bytes_per_sec <= 0 or bytes_per_sec < threshold:
+            return "  0", "K"
+
+        if speed_unit == "bytes":
+            value, step = bytes_per_sec / 1024, 1024
+        else:
+            value, step = bytes_per_sec * 8 / 1000, 1000
+
+        units = ("K", "M", "G")
+        index = 0
+        while value >= 999.5 and index < len(units) - 1:
+            value /= step
+            index += 1
+
+        text = f"{value:.1f}" if value < 9.95 else str(round(value))
+        return text.rjust(3), units[index]
