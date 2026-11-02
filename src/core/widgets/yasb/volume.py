@@ -612,6 +612,7 @@ class VolumeWidget(BaseWidget):
         label_parts = re.split("(<span.*?>.*?</span>)", active_label_content)
         label_parts = [part for part in label_parts if part]
         widget_index = 0
+        volume_level = 0
 
         if self.volume is None:
             fallback_icon = (

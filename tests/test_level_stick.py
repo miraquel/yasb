@@ -1,3 +1,5 @@
+# pyright: reportPrivateUsage=false
+
 """Tests for the level stick: a vertical progress_bar beside the icon of the microphone, volume and
 battery widgets, coloured by the widget's state (muted, battery level, charging).
 
@@ -12,6 +14,7 @@ real system volume or battery.
 import sys
 import unittest
 from pathlib import Path
+from typing import Protocol, cast
 from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -22,10 +25,12 @@ if str(SRC_ROOT) not in sys.path:
 
 from PyQt6.QtCore import QAbstractAnimation, Qt  # noqa: E402
 from PyQt6.QtTest import QTest  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QWidget  # noqa: E402
 
 APP = QApplication.instance() or QApplication([])
 
+from core.utils.progress_bar import ProgressWidget  # noqa: E402
+from core.utils.widgets.volume.inline_slider import InlineVolumeSlider  # noqa: E402
 from core.validation.widgets.yasb.battery import BatteryConfig  # noqa: E402
 from core.validation.widgets.yasb.microphone import MicrophoneConfig  # noqa: E402
 from core.validation.widgets.yasb.volume import VolumeConfig  # noqa: E402
@@ -33,6 +38,17 @@ from core.widgets.services.battery.battery_api import POWER_TIME_UNKNOWN, Batter
 from core.widgets.yasb.battery import BatteryWidget  # noqa: E402
 from core.widgets.yasb.microphone import MicrophoneWidget  # noqa: E402
 from core.widgets.yasb.volume import VolumeWidget  # noqa: E402
+
+
+class QTestFunctions(Protocol):
+    """The QTest function these tests call, typed as it is called. QTest is a C++ namespace and
+    its functions are static, but PyQt6's stubs declare them as instance methods of a class that
+    cannot be instantiated, so a call on QTest would miss the `self` they declare."""
+
+    def qWait(self, ms: int) -> None: ...
+
+
+qtest = cast(QTestFunctions, QTest)
 
 TRACK = "#45475a"
 PINK = "#f5c2e7"
@@ -53,6 +69,11 @@ STICK = {
     "animation": False,
 }
 
+StickOption = str | dict[str, str]
+"""A progress_bar option a test sets on top of STICK: muted_color, or level_colors."""
+
+StickWidget = MicrophoneWidget | VolumeWidget | BatteryWidget
+
 
 class FakeEndpoint:
     """Stands in for pycaw's IAudioEndpointVolume (speaker or microphone)."""
@@ -64,13 +85,13 @@ class FakeEndpoint:
     def GetMasterVolumeLevelScalar(self) -> float:
         return self.level
 
-    def SetMasterVolumeLevelScalar(self, level: float, context) -> None:
+    def SetMasterVolumeLevelScalar(self, level: float, context: object) -> None:
         self.level = level
 
     def GetMute(self) -> int:
         return self.muted
 
-    def SetMute(self, muted: bool, context) -> None:
+    def SetMute(self, muted: bool, context: object) -> None:
         self.muted = int(bool(muted))
 
 
@@ -80,10 +101,10 @@ class FakeAudioService:
     def __init__(self, endpoint: FakeEndpoint):
         self.endpoint = endpoint
 
-    def register_widget(self, widget) -> None:
+    def register_widget(self, widget: object) -> None:
         pass
 
-    def unregister_widget(self, widget) -> None:
+    def unregister_widget(self, widget: object) -> None:
         pass
 
     def get_volume_interface(self) -> FakeEndpoint:
@@ -121,16 +142,16 @@ def battery_data(
     )
 
 
-def make_mic(endpoint: FakeEndpoint, **stick) -> MicrophoneWidget:
-    config = MicrophoneConfig(
-        label="<span>{icon}</span>", tooltip=False, progress_bar={**STICK, "color": PINK, **stick}
+def make_mic(endpoint: FakeEndpoint, **stick: StickOption) -> MicrophoneWidget:
+    config = MicrophoneConfig.model_validate(
+        {"label": "<span>{icon}</span>", "tooltip": False, "progress_bar": {**STICK, "color": PINK, **stick}}
     )
     with patch("core.widgets.yasb.microphone.AudioInputService", return_value=FakeAudioService(endpoint)):
         return MicrophoneWidget(config)
 
 
-def make_volume(endpoint: FakeEndpoint, inline: bool = False, **stick) -> VolumeWidget:
-    options = {
+def make_volume(endpoint: FakeEndpoint, inline: bool = False, **stick: StickOption) -> VolumeWidget:
+    options: dict[str, object] = {
         "label": "<span>{icon}</span>",
         "tooltip": False,
         "slider_beep": False,
@@ -139,11 +160,11 @@ def make_volume(endpoint: FakeEndpoint, inline: bool = False, **stick) -> Volume
     if inline:
         options["inline_slider"] = {"enabled": True, "animation_duration": 60, "auto_close": 0}
     with patch("core.widgets.yasb.volume.AudioOutputService", return_value=FakeAudioService(endpoint)):
-        return VolumeWidget(VolumeConfig(**options))
+        return VolumeWidget(VolumeConfig.model_validate(options))
 
 
-def make_battery(data: BatteryData, tooltip: bool | None = None, **stick) -> BatteryWidget:
-    options = {
+def make_battery(data: BatteryData, tooltip: bool | None = None, **stick: StickOption) -> BatteryWidget:
+    options: dict[str, object] = {
         "label": "<span>{icon}</span>",
         "update_interval": 0,
         "charging_options": {"blink_charging_icon": False},
@@ -152,15 +173,35 @@ def make_battery(data: BatteryData, tooltip: bool | None = None, **stick) -> Bat
     if tooltip is not None:
         options["tooltip"] = tooltip
     with patch("core.widgets.yasb.battery.BatteryAPI.instance", return_value=FakeBatteryAPI(data)):
-        widget = BatteryWidget(BatteryConfig(**options))
-    widget._battery_api = FakeBatteryAPI(data)
+        widget = BatteryWidget(BatteryConfig.model_validate(options))
     widget._update_label()
     return widget
 
 
-def stick_at(widget, height_from_bottom: int) -> str:
+def fake_battery_api(battery: BatteryWidget) -> FakeBatteryAPI:
+    """The fake API make_battery gave the widget in place of BatteryAPI."""
+    api = battery._battery_api
+    assert isinstance(api, FakeBatteryAPI)
+    return api
+
+
+def level_stick(widget: StickWidget) -> ProgressWidget:
+    """The widget's stick, which every widget here is built with."""
+    stick = widget.progress_widget
+    assert stick is not None, "the progress_bar is off"
+    return stick
+
+
+def inline_slider(volume: VolumeWidget) -> InlineVolumeSlider:
+    """The volume widget's inline slider, which make_volume builds when asked for `inline`."""
+    slider = volume._inline_slider
+    assert slider is not None, "the inline slider is off"
+    return slider
+
+
+def stick_at(widget: StickWidget, height_from_bottom: int) -> str:
     """The colour the stick paints this many pixels up from its bottom edge (1 = bottom row)."""
-    image = widget.progress_widget.grab().toImage()
+    image = level_stick(widget).grab().toImage()
     return image.pixelColor(1, image.height() - height_from_bottom).name()
 
 
@@ -209,7 +250,7 @@ class VolumeStickTest(unittest.TestCase):
         self.assertEqual(stick_at(volume, 1), TRACK)
 
 
-def show_offscreen(test: unittest.TestCase, widget) -> QFrame:
+def show_offscreen(test: unittest.TestCase, widget: QWidget) -> QFrame:
     host = QFrame()
     host.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     layout = QHBoxLayout(host)
@@ -222,11 +263,11 @@ def show_offscreen(test: unittest.TestCase, widget) -> QFrame:
     return host
 
 
-def wait_for_slide(slider) -> None:
+def wait_for_slide(slider: InlineVolumeSlider) -> None:
     for _ in range(400):
         if slider._animation.state() != QAbstractAnimation.State.Running:
             break
-        QTest.qWait(5)
+        qtest.qWait(5)
     for _ in range(20):
         APP.processEvents()
 
@@ -235,24 +276,24 @@ class VolumeStickBesideInlineSliderTest(unittest.TestCase):
     def test_stick_hides_while_the_slider_is_out(self):
         volume = make_volume(FakeEndpoint(0.45), inline=True)
         show_offscreen(self, volume)
-        self.assertTrue(volume.progress_widget.isVisible())
+        self.assertTrue(level_stick(volume).isVisible())
 
         volume._toggle_inline_slider()
-        self.assertFalse(volume.progress_widget.isVisible())
-        wait_for_slide(volume._inline_slider)
+        self.assertFalse(level_stick(volume).isVisible())
+        wait_for_slide(inline_slider(volume))
         volume._update_label()  # a level change while open must not bring it back
-        self.assertFalse(volume.progress_widget.isVisible())
+        self.assertFalse(level_stick(volume).isVisible())
 
     def test_stick_comes_back_once_the_slider_has_slid_in(self):
         volume = make_volume(FakeEndpoint(0.45), inline=True)
         show_offscreen(self, volume)
         volume._toggle_inline_slider()
-        wait_for_slide(volume._inline_slider)
+        wait_for_slide(inline_slider(volume))
 
         volume._toggle_inline_slider()
-        wait_for_slide(volume._inline_slider)
-        self.assertTrue(volume.progress_widget.isVisible())
-        self.assertFalse(volume._inline_slider.isVisible())
+        wait_for_slide(inline_slider(volume))
+        self.assertTrue(level_stick(volume).isVisible())
+        self.assertFalse(inline_slider(volume).isVisible())
 
 
 LEVEL_COLORS = {"medium": YELLOW, "charging": CYAN}
@@ -279,16 +320,17 @@ class BatteryStickTest(unittest.TestCase):
 
     def test_colour_follows_the_level_as_it_changes(self):
         battery = make_battery(battery_data(59), level_colors=LEVEL_COLORS)
-        battery._battery_api = FakeBatteryAPI(battery_data(59, is_charging=True, power_plugged=True))
+        api = fake_battery_api(battery)
+        api.data = battery_data(59, is_charging=True, power_plugged=True)
         battery._update_label()
         self.assertEqual(stick_at(battery, 1), CYAN)
-        battery._battery_api = FakeBatteryAPI(battery_data(90))
+        api.data = battery_data(90)
         battery._update_label()
         self.assertEqual(stick_at(battery, 1), RED)
 
 
 class BatteryTooltipTest(unittest.TestCase):
-    def tooltip(self, battery) -> str | None:
+    def tooltip(self, battery: BatteryWidget) -> str | None:
         tooltip_filter = getattr(battery, "_tooltip_filter", None)
         return tooltip_filter.tooltip_text if tooltip_filter else None
 

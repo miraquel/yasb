@@ -102,8 +102,7 @@ class BatteryWidget(BaseWidget):
             )
         return icon
 
-    def _get_tooltip_text(self, time_remaining: str) -> str:
-        state = self._battery_state
+    def _get_tooltip_text(self, state: BatteryData, time_remaining: str) -> str:
         text = f"Battery {state.percent}%"
         if state.is_charging:
             return f"{text}, charging"
@@ -184,7 +183,7 @@ class BatteryWidget(BaseWidget):
             self.progress_widget.set_color(level_color or self.config.progress_bar.color)
 
         if self.config.tooltip:
-            set_tooltip(self, self._get_tooltip_text(time_remaining))
+            set_tooltip(self, self._get_tooltip_text(self._battery_state, time_remaining))
 
         for part in label_parts:
             part = part.strip()

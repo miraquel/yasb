@@ -1,7 +1,9 @@
 """The volume slider that slides out of the bar beside the speaker icon."""
 
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QMouseEvent, QWheelEvent
+from typing import override
+
+from PyQt6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QEnterEvent, QMouseEvent, QWheelEvent
 from PyQt6.QtWidgets import (
     QWIDGETSIZE_MAX,
     QFrame,
@@ -26,29 +28,32 @@ class _BarSlider(QSlider):
         self.setPageStep(step)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:
+    @override
+    def mousePressEvent(self, ev: QMouseEvent | None) -> None:
         # Only the windows11 style jumps to a left click; windowsvista (Windows 10) and Fusion
         # step toward it a page at a time. Move the handle under the pointer first, then the
         # press lands on it and can drag on from there.
-        if event.button() == Qt.MouseButton.LeftButton:
+        style = self.style()
+        if ev is not None and style is not None and ev.button() == Qt.MouseButton.LeftButton:
             option = QStyleOptionSlider()
             self.initStyleOption(option)
-            style = self.style()
             handle = style.subControlRect(
                 QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderHandle, self
             )
-            if not handle.contains(event.position().toPoint()):
+            if not handle.contains(ev.position().toPoint()):
                 groove = style.subControlRect(
                     QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderGroove, self
                 )
                 span = groove.width() - handle.width()
-                offset = round(event.position().x()) - groove.x() - handle.width() // 2
+                offset = round(ev.position().x()) - groove.x() - handle.width() // 2
                 self.setValue(QStyle.sliderValueFromPosition(self.minimum(), self.maximum(), offset, span))
-        super().mousePressEvent(event)
+        super().mousePressEvent(ev)
 
-    def wheelEvent(self, event: QWheelEvent) -> None:
+    @override
+    def wheelEvent(self, e: QWheelEvent | None) -> None:
         # Pass the wheel on, so it steps the volume by scroll_step exactly as it does over the icon
-        event.ignore()
+        if e is not None:
+            e.ignore()
 
 
 class InlineVolumeSlider(QFrame):
@@ -202,20 +207,25 @@ class InlineVolumeSlider(QFrame):
             return
         self.collapse()
 
-    def enterEvent(self, event) -> None:
+    @override
+    def enterEvent(self, event: QEnterEvent | None) -> None:
         self._hovered = True
         self._close_timer.stop()
         super().enterEvent(event)
 
-    def leaveEvent(self, event) -> None:
+    @override
+    def leaveEvent(self, a0: QEvent | None) -> None:
         self._hovered = False
         self.postpone_close()
-        super().leaveEvent(event)
+        super().leaveEvent(a0)
 
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+    @override
+    def mouseReleaseEvent(self, a0: QMouseEvent | None) -> None:
         # A left click in the gaps or on the value is not a click on the speaker: keep it open
-        if event.button() == Qt.MouseButton.LeftButton:
-            event.accept()
+        if a0 is None:
+            return
+        if a0.button() == Qt.MouseButton.LeftButton:
+            a0.accept()
             self.postpone_close()
         else:
-            event.ignore()
+            a0.ignore()

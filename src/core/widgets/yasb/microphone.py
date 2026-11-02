@@ -94,6 +94,7 @@ class MicrophoneWidget(BaseWidget):
         label_parts = re.split("(<span.*?>.*?</span>)", active_label_content)
         label_parts = [part for part in label_parts if part]
         widget_index = 0
+        mic_level = 0
 
         # Handle no device case
         if self.audio_endpoint is None:
