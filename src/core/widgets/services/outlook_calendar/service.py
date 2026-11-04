@@ -19,13 +19,13 @@ import time
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, override
 
-import pythoncom
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 
 from core.utils.system import app_data_path
-from core.widgets.services.outlook_calendar.agenda import Snapshot, snapshot_from_cache, snapshot_to_cache
+from core.utils.win32.bindings.ole32 import CoInitialize, CoUninitialize
+from core.widgets.services.outlook_calendar.agenda import CalEvent, Snapshot, snapshot_from_cache, snapshot_to_cache
 from core.widgets.services.outlook_calendar.outlook import OutlookNotRunning, fetch
 
 logger = logging.getLogger("outlook_calendar")
@@ -73,8 +73,9 @@ class _FetchWorker(QThread):
         self._days = days
         self._scan_body = scan_body
 
+    @override
     def run(self) -> None:
-        pythoncom.CoInitialize()
+        initialised = CoInitialize() >= 0
         try:
             events = fetch(datetime.now(), self._days, self._scan_body)
         except OutlookNotRunning:
@@ -85,7 +86,8 @@ class _FetchWorker(QThread):
         else:
             self.done.emit(events, "")
         finally:
-            pythoncom.CoUninitialize()
+            if initialised:
+                CoUninitialize()
 
 
 class OutlookCalendarService(QObject):
@@ -211,7 +213,7 @@ class OutlookCalendarService(QObject):
             self._refresh_after_fetch = False
             self.refresh_now()
 
-    def _on_done(self, events, failure: str) -> None:
+    def _on_done(self, events: list[CalEvent] | None, failure: str) -> None:
         if events is not None:
             self._failures = 0
             self._outlook_closed = False

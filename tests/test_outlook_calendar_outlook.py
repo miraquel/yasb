@@ -1,14 +1,19 @@
+# pyright: reportPrivateUsage=false
+
 """Tests for the Outlook COM source, against a fake Outlook object model.
 
-The fakes follow the real one where it matters: Start and End come back as local wall time
-labelled GMT, Restrict sees whether IncludeRecurrences was already set, and Body counts its
-reads, since reading it is the access Outlook's security prompt would guard.
+The fakes follow the real one where it matters: Start and End come back as naive local wall
+time (what comtypes makes of a COM date), Restrict sees whether IncludeRecurrences was already
+set, and Body counts its reads, since reading it is the access Outlook's security prompt would
+guard. Nothing here needs Outlook installed.
 """
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from ctypes import WinError
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +22,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-import pywintypes  # noqa: E402
+import comtypes  # noqa: E402  # pyright: ignore[reportMissingTypeStubs]
 
 from core.widgets.services.outlook_calendar import outlook  # noqa: E402
 from core.widgets.services.outlook_calendar.agenda import CalEvent  # noqa: E402
@@ -32,38 +37,40 @@ from core.widgets.services.outlook_calendar.outlook import (  # noqa: E402
 )
 
 NOW = datetime(2026, 10, 1, 9, 0)
-GMT = timezone(timedelta(0), "GMT Standard Time")
 ZOOM = "https://us02web.zoom.us/j/81234567890?pwd=abcDEF123"
 TEAMS_NEW = "https://teams.microsoft.com/meet/23456789012?p=AbCdEf"
+
+MK_E_UNAVAILABLE = -2147221021
+CO_E_CLASSSTRING = -2147221005
+RPC_E_CALL_REJECTED = -2147418111
 
 
 def at(day: int, hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 10, day, hour, minute)
 
 
-def com_error(hresult: int, text: str = "") -> pywintypes.com_error:
-    return pywintypes.com_error(hresult, text, None, None)
+def com_error(hresult: int, text: str = "") -> comtypes.COMError:
+    return comtypes.COMError(hresult, text, (text, None, None, 0, None))
 
 
 class FakeItem:
     def __init__(
         self,
-        start,
-        end,
-        subject="Meeting",
-        location="",
-        body="",
-        all_day=False,
-        busy=2,
-        response=3,
-        meeting_status=0,
-        entry_id="E1",
-        recurring=False,
-        broken=False,
+        start: datetime,
+        end: datetime,
+        subject: str = "Meeting",
+        location: str = "",
+        body: str = "",
+        all_day: bool = False,
+        busy: int = 2,
+        response: int = 3,
+        meeting_status: int = 0,
+        entry_id: str = "E1",
+        recurring: bool = False,
+        broken: bool = False,
     ):
-        # Outlook hands back local wall time labelled with a GMT tzinfo.
-        self.Start = start.replace(tzinfo=GMT)
-        self.End = end.replace(tzinfo=GMT)
+        self.Start = start
+        self.End = end
         self._subject = subject
         self.Location = location
         self._body = body
@@ -77,32 +84,32 @@ class FakeItem:
         self._broken = broken
 
     @property
-    def Subject(self):
+    def Subject(self) -> str:
         if self._broken:
             raise com_error(-2147467259, "Unspecified error")
         return self._subject
 
     @property
-    def Body(self):
+    def Body(self) -> str:
         self.body_reads += 1
         return self._body
 
 
 class FakeRestricted:
-    def __init__(self, items):
+    def __init__(self, items: list[FakeItem]):
         self._items = list(items)
         self._index = 0
         self.reads = 0
 
-    def GetFirst(self):
+    def GetFirst(self) -> FakeItem | None:
         self._index = 0
         return self._current()
 
-    def GetNext(self):
+    def GetNext(self) -> FakeItem | None:
         self._index += 1
         return self._current()
 
-    def _current(self):
+    def _current(self) -> FakeItem | None:
         if self._index < len(self._items):
             self.reads += 1
             return self._items[self._index]
@@ -110,17 +117,17 @@ class FakeRestricted:
 
 
 class FakeItems:
-    def __init__(self, items):
+    def __init__(self, items: list[FakeItem]):
         self._items = items
         self.IncludeRecurrences = False
-        self.calls = []
-        self.query = None
-        self.restricted = None
+        self.calls: list[tuple[object, ...]] = []
+        self.query: str | None = None
+        self.restricted: FakeRestricted | None = None
 
-    def Sort(self, key):
+    def Sort(self, key: str) -> None:
         self.calls.append(("Sort", key, self.IncludeRecurrences))
 
-    def Restrict(self, query):
+    def Restrict(self, query: str) -> FakeRestricted:
         self.calls.append(("Restrict", self.IncludeRecurrences))
         self.query = query
         self.restricted = FakeRestricted(self._items)
@@ -128,21 +135,21 @@ class FakeItems:
 
 
 class FakeOutlook:
-    def __init__(self, items):
+    def __init__(self, items: list[FakeItem]):
         self.items = FakeItems(items)
         self.folder = mock.Mock(StoreID="S1", Items=self.items)
         self.namespace = mock.Mock()
         self.namespace.GetDefaultFolder.return_value = self.folder
 
-    def GetNamespace(self, name):
+    def GetNamespace(self, name: str) -> Any:
         assert name == "MAPI"
         return self.namespace
 
 
 class FetchTests(unittest.TestCase):
-    def fetch(self, items, **kwargs):
+    def fetch(self, items: list[FakeItem], scan_body: bool = True) -> tuple[list[CalEvent], FakeOutlook]:
         app = FakeOutlook(items)
-        return fetch(NOW, 7, application=app, **kwargs), app
+        return fetch(NOW, 7, scan_body=scan_body, application=app), app
 
     def test_converts_items_to_naive_local_events(self):
         item = FakeItem(
@@ -172,6 +179,12 @@ class FetchTests(unittest.TestCase):
         self.assertIsNone(events[0].start.tzinfo)
         app.namespace.GetDefaultFolder.assert_called_once_with(9)
 
+    def test_rounds_a_com_date_to_the_second(self):
+        # A COM date is a float count of days; a whole minute can come back a hair short.
+        item = FakeItem(at(1, 9, 30) - timedelta(microseconds=1), at(1, 10, 0) + timedelta(microseconds=2))
+        events, _ = self.fetch([item])
+        self.assertEqual((events[0].start, events[0].end), (at(1, 9, 30), at(1, 10, 0)))
+
     def test_sorts_before_expanding_recurrences_and_restricts_to_the_window(self):
         _, app = self.fetch([])
         self.assertEqual(app.items.calls, [("Sort", "[Start]", False), ("Restrict", True)])
@@ -199,6 +212,7 @@ class FetchTests(unittest.TestCase):
         ]
         events, app = self.fetch(items)
         self.assertEqual([e.subject for e in events], ["Inside"])
+        assert app.items.restricted is not None
         self.assertEqual(app.items.restricted.reads, 2)
 
     def test_drops_items_that_ended_before_today(self):
@@ -221,7 +235,7 @@ class FetchTests(unittest.TestCase):
         self.assertEqual([e.subject for e in events], ["Readable"])
 
     def test_all_items_unreadable_is_a_failure(self):
-        with self.assertRaises(pywintypes.com_error):
+        with self.assertRaises(comtypes.COMError):
             self.fetch([FakeItem(at(1, 10), at(1, 11), broken=True), FakeItem(at(1, 12), at(1, 13), broken=True)])
 
     def test_join_url_prefers_location_then_body(self):
@@ -239,25 +253,32 @@ class FetchTests(unittest.TestCase):
 
 
 class AttachTests(unittest.TestCase):
-    def attach_fails(self, hresult):
-        return mock.patch.object(outlook.win32com.client, "GetActiveObject", side_effect=com_error(hresult))
+    def attach_fails(self, hresult: int):
+        # comtypes reports a failed GetActiveObject as an OSError carrying the HRESULT.
+        return mock.patch.object(outlook, "get_active_dispatch", side_effect=WinError(hresult))
 
     def test_not_running(self):
-        with self.attach_fails(-2147221021), self.assertRaises(OutlookNotRunning):
+        with self.attach_fails(MK_E_UNAVAILABLE), self.assertRaises(OutlookNotRunning):
             fetch(NOW, 7)
 
     def test_not_installed_counts_as_not_running(self):
-        with self.attach_fails(-2147221005), self.assertRaises(OutlookNotRunning):
+        with self.attach_fails(CO_E_CLASSSTRING), self.assertRaises(OutlookNotRunning):
             fetch(NOW, 7)
 
     def test_busy_outlook_is_an_error_not_closed(self):
-        with self.attach_fails(-2147418111), self.assertRaises(pywintypes.com_error):
+        with self.attach_fails(RPC_E_CALL_REJECTED), self.assertRaises(OSError) as caught:
             fetch(NOW, 7)
+        self.assertNotIsInstance(caught.exception, OutlookNotRunning)
+
+    def test_attaches_to_outlook_by_progid(self):
+        with mock.patch.object(outlook, "get_active_dispatch", return_value=FakeOutlook([])) as attach:
+            fetch(NOW, 7)
+        attach.assert_called_once_with("Outlook.Application")
 
     def test_never_dispatches(self):
         with (
-            self.attach_fails(-2147221021),
-            mock.patch.object(outlook.win32com.client, "Dispatch") as dispatch,
+            self.attach_fails(MK_E_UNAVAILABLE),
+            mock.patch.object(outlook, "create_dispatch") as dispatch,
             self.assertRaises(OutlookNotRunning),
         ):
             fetch(NOW, 7)
@@ -273,12 +294,11 @@ class OutlookTimeTests(unittest.TestCase):
 
 class OpenEventTests(unittest.TestCase):
     def setUp(self):
-        for target, name in (
-            (outlook.pythoncom, "CoInitialize"),
-            (outlook.pythoncom, "CoUninitialize"),
-            (outlook, "_allow_foreground"),
+        for patcher in (
+            mock.patch.object(outlook, "CoInitialize", return_value=0),
+            mock.patch.object(outlook, "CoUninitialize"),
+            mock.patch.object(outlook, "_allow_foreground"),
         ):
-            patcher = mock.patch.object(target, name)
             patcher.start()
             self.addCleanup(patcher.stop)
         self.app = mock.Mock()
@@ -293,8 +313,9 @@ class OpenEventTests(unittest.TestCase):
     def test_opens_the_occurrence_of_a_recurring_event(self):
         get_occurrence = self.item.GetRecurrencePattern.return_value.GetOccurrence
         open_event("E1", "S1", at(1, 10), True, application=self.app)
+        get_occurrence.assert_called_once_with(at(1, 10))
         (stamp,), _ = get_occurrence.call_args
-        self.assertEqual((stamp.year, stamp.month, stamp.day, stamp.hour, stamp.minute), (2026, 10, 1, 10, 0))
+        self.assertIsNone(stamp.tzinfo)
         get_occurrence.return_value.Display.assert_called_once_with()
         self.item.Display.assert_not_called()
 
@@ -308,6 +329,20 @@ class OpenEventTests(unittest.TestCase):
         with self.assertLogs("outlook_calendar", "WARNING"):
             open_event("E1", "S1", at(1, 10), False, application=self.app)
 
+    def test_starts_outlook_when_none_is_given(self):
+        with mock.patch.object(outlook, "create_dispatch", return_value=self.app) as dispatch:
+            open_event("E1", "S1", at(1, 10), False)
+        dispatch.assert_called_once_with("Outlook.Application")
+        self.item.Display.assert_called_once_with()
+
+    def test_com_is_torn_down_only_when_it_was_set_up(self):
+        with (
+            mock.patch.object(outlook, "CoInitialize", return_value=-2147417850),  # RPC_E_CHANGED_MODE
+            mock.patch.object(outlook, "CoUninitialize") as uninitialise,
+        ):
+            open_event("E1", "S1", at(1, 10), False, application=self.app)
+        uninitialise.assert_not_called()
+
     def test_proxies_are_released_before_com_is_torn_down(self):
         # Plain fakes: a Mock caches its return_value and would keep the item alive.
         events: list[str] = []
@@ -316,18 +351,18 @@ class OpenEventTests(unittest.TestCase):
             def __del__(self):
                 events.append("item released")
 
-            def Display(self):
+            def Display(self) -> None:
                 pass
 
         class Namespace:
-            def GetItemFromID(self, entry_id, store_id):
+            def GetItemFromID(self, entry_id: str, store_id: str) -> Item:
                 return Item()
 
         class Application:
-            def GetNamespace(self, name):
+            def GetNamespace(self, name: str) -> Namespace:
                 return Namespace()
 
-        with mock.patch.object(outlook.pythoncom, "CoUninitialize", side_effect=lambda: events.append("uninit")):
+        with mock.patch.object(outlook, "CoUninitialize", side_effect=lambda: events.append("uninit")):
             open_event("E1", "S1", at(1, 10), False, application=Application())
         self.assertEqual(events, ["item released", "uninit"])
 

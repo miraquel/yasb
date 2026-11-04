@@ -9,23 +9,26 @@ the point.
 Everything here blocks on Outlook, so it runs off the UI thread. ``fetch``'s caller has
 initialised COM on its thread; ``open_event`` always runs on a thread of its own and does so
 itself.
+
+COM goes through comtypes late binding. comtypes hands dates over as naive datetimes holding
+the wall time Outlook stores, so no time zone conversion happens on either side.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+from typing import Any
 
-import pythoncom
-import pywintypes
-import win32api
-import win32com.client
-import win32timezone  # noqa: F401  # pywintypes imports it at runtime to convert COM dates; named so the build bundles it
+import comtypes  # pyright: ignore[reportMissingTypeStubs]
 
 from core.utils.shell_utils import shell_open
+from core.utils.win32.bindings.kernel32 import GetDateFormat, GetTimeFormat
+from core.utils.win32.bindings.ole32 import CoInitialize, CoUninitialize, create_dispatch, get_active_dispatch
 from core.utils.win32.bindings.user32 import AllowSetForegroundWindow
 from core.utils.win32.constants import ASFW_ANY, DATE_SHORTDATE, LOCALE_USER_DEFAULT, TIME_NOSECONDS
+from core.utils.win32.structs import SYSTEMTIME
 from core.widgets.services.outlook_calendar.agenda import RESPONSE_DECLINED, CalEvent, day_start, find_join_url
 
 logger = logging.getLogger("outlook_calendar")
@@ -36,48 +39,57 @@ _CANCELLED = (5, 7)  # olMeetingCanceled, olMeetingReceivedAndCanceled
 # MK_E_UNAVAILABLE: not in the Running Object Table, so not running in this session (or
 # running at another integrity level). CO_E_CLASSSTRING: classic Outlook is not installed.
 _NOT_RUNNING = (-2147221021, -2147221005)
+# What a COM call can fail with: COMError from a method or property, OSError from the
+# runtime itself (attaching, a dead RPC server).
+COM_ERRORS = (comtypes.COMError, OSError)
 
 
 class OutlookNotRunning(Exception):
     """Classic Outlook is not running in this session."""
 
 
-def _attach():
+def _attach() -> Any:
     try:
-        return win32com.client.GetActiveObject("Outlook.Application")
-    except pywintypes.com_error as error:
-        if error.hresult in _NOT_RUNNING:
+        return get_active_dispatch("Outlook.Application")
+    except OSError as error:
+        if error.winerror in _NOT_RUNNING:
             raise OutlookNotRunning() from error
         raise
 
 
-def _com_time(value: datetime):
-    """*value*'s wall time as a COM time.
+def _com_time(value: datetime) -> datetime:
+    """*value*'s wall time as comtypes passes a COM date: naive, converted as it stands."""
+    return value.replace(tzinfo=None)
 
-    pywintypes treats a naive datetime as local time and shifts it to UTC on the way in;
-    labelling the wall time UTC makes it pass through unchanged.
-    """
-    return pywintypes.Time(value.replace(tzinfo=UTC))
+
+def _system_time(value: datetime) -> SYSTEMTIME:
+    return SYSTEMTIME(
+        value.year, value.month, (value.weekday() + 1) % 7, value.day, value.hour, value.minute, value.second, 0
+    )
 
 
 def outlook_time(value: datetime) -> str:
     """*value* the way Items.Restrict parses a date: the user's short date and time format."""
-    stamp = _com_time(value)
-    date_text = win32api.GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, stamp, None)
-    time_text = win32api.GetTimeFormat(LOCALE_USER_DEFAULT, TIME_NOSECONDS, stamp, None)
+    stamp = _system_time(value)
+    date_text = GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, stamp)
+    time_text = GetTimeFormat(LOCALE_USER_DEFAULT, TIME_NOSECONDS, stamp)
     return f"{date_text} {time_text}"
 
 
 def _local(value: datetime) -> datetime:
-    """Outlook returns local wall time labelled with a GMT tzinfo: keep the wall time."""
-    return datetime(value.year, value.month, value.day, value.hour, value.minute, value.second)
+    """A COM date as naive wall time, to the nearest second.
+
+    A COM date is a float count of days, so a whole minute can come back a microsecond short.
+    """
+    value = value.replace(tzinfo=None) + timedelta(microseconds=500_000)
+    return value.replace(microsecond=0)
 
 
-def _skipped(item) -> bool:
+def _skipped(item: Any) -> bool:
     return int(item.ResponseStatus) == RESPONSE_DECLINED or int(item.MeetingStatus) in _CANCELLED
 
 
-def _event(item, store_id: str, scan_body: bool) -> CalEvent:
+def _event(item: Any, store_id: str, scan_body: bool) -> CalEvent:
     location = str(item.Location or "")
     join_url = find_join_url(location)
     if not join_url and scan_body:
@@ -97,11 +109,11 @@ def _event(item, store_id: str, scan_body: bool) -> CalEvent:
     )
 
 
-def fetch(now: datetime, days: int, scan_body: bool = True, application=None) -> list[CalEvent]:
+def fetch(now: datetime, days: int, scan_body: bool = True, application: Any = None) -> list[CalEvent]:
     """The default calendar's events from today 00:00 for *days* days, soonest first.
 
     Raises ``OutlookNotRunning`` when there is no Outlook to attach to. Any other COM failure
-    (Outlook busy behind a modal dialog, say) propagates as ``pywintypes.com_error``.
+    (Outlook busy behind a modal dialog, say) propagates as one of ``COM_ERRORS``.
     """
     app = application if application is not None else _attach()
     folder = app.GetNamespace("MAPI").GetDefaultFolder(OL_FOLDER_CALENDAR)
@@ -127,7 +139,7 @@ def fetch(now: datetime, days: int, scan_body: bool = True, application=None) ->
                 break
             if not _skipped(item) and _local(item.End) > window_start:
                 events.append(_event(item, store_id, scan_body))
-        except (pywintypes.com_error, AttributeError, TypeError, ValueError) as error:
+        except (*COM_ERRORS, AttributeError, TypeError, ValueError) as error:
             failures += 1
             last_error = error
             logger.debug("outlook calendar: skipped an unreadable item: %s", error)
@@ -143,15 +155,15 @@ def _allow_foreground() -> None:
     AllowSetForegroundWindow(ASFW_ANY)
 
 
-def _open(entry_id: str, store_id: str, start: datetime, recurring: bool, application) -> None:
+def _open(entry_id: str, store_id: str, start: datetime, recurring: bool, application: Any) -> None:
     # The COM proxies are locals here, so they are released when this returns, before the
     # caller uninitialises COM. Releasing one after CoUninitialize can crash the process.
-    app = application if application is not None else win32com.client.Dispatch("Outlook.Application")
+    app = application if application is not None else create_dispatch("Outlook.Application")
     item = app.GetNamespace("MAPI").GetItemFromID(entry_id, store_id)
     if recurring:
         try:
             item = item.GetRecurrencePattern().GetOccurrence(_com_time(start))
-        except pywintypes.com_error:
+        except COM_ERRORS:
             # A moved occurrence is an exception with no slot at its original time;
             # opening the series is the next best thing.
             logger.debug("outlook calendar: no occurrence at %s, opening the series", start)
@@ -159,15 +171,16 @@ def _open(entry_id: str, store_id: str, start: datetime, recurring: bool, applic
     item.Display()
 
 
-def open_event(entry_id: str, store_id: str, start: datetime, recurring: bool, application=None) -> None:
+def open_event(entry_id: str, store_id: str, start: datetime, recurring: bool, application: Any = None) -> None:
     """Open one event in Outlook, starting Outlook if needed. Blocks; run it on its own thread."""
-    pythoncom.CoInitialize()
+    initialised = CoInitialize() >= 0
     try:
         _open(entry_id, store_id, start, recurring, application)
     except Exception as error:  # a click must never take the bar down
         logger.warning("outlook calendar: could not open the event: %s", error)
     finally:
-        pythoncom.CoUninitialize()
+        if initialised:
+            CoUninitialize()
 
 
 def open_event_in_background(event: CalEvent) -> threading.Thread:

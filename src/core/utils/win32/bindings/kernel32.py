@@ -6,6 +6,7 @@ from ctypes import (
     WINFUNCTYPE,
     Array,
     WinDLL,
+    WinError,
     byref,
     c_char,
     c_int,
@@ -50,6 +51,7 @@ from core.utils.win32.structs import (
     PROCESS_INFORMATION,
     PROCESSENTRY32,
     SYSTEM_POWER_STATUS,
+    SYSTEMTIME,
     WIN32_FIND_DATAW,
 )
 from core.utils.win32.typecheck import CArgObject
@@ -350,6 +352,12 @@ kernel32.GlobalMemoryStatusEx.restype = BOOL
 
 kernel32.GetLocaleInfoW.argtypes = [DWORD, DWORD, LPWSTR, c_int]
 kernel32.GetLocaleInfoW.restype = c_int
+
+kernel32.GetDateFormatW.argtypes = [DWORD, DWORD, POINTER(SYSTEMTIME), LPCWSTR, LPWSTR, c_int]
+kernel32.GetDateFormatW.restype = c_int
+
+kernel32.GetTimeFormatW.argtypes = [DWORD, DWORD, POINTER(SYSTEMTIME), LPCWSTR, LPWSTR, c_int]
+kernel32.GetTimeFormatW.restype = c_int
 
 kernel32.CreatePipe.argtypes = [POINTER(HANDLE), POINTER(HANDLE), LPVOID, DWORD]
 kernel32.CreatePipe.restype = BOOL
@@ -770,6 +778,24 @@ def GetUserGeoID(GeoClass: int) -> int:
 
 def GetGeoInfo(Location: int, GeoType: int, lpGeoData: Array[c_wchar], LangId: int = 0) -> int:
     return kernel32.GetGeoInfoW(Location, GeoType, lpGeoData, len(lpGeoData), LangId)
+
+
+def GetDateFormat(Locale: int, dwFlags: int, lpDate: SYSTEMTIME | None, lpFormat: str | None = None) -> str:
+    """*lpDate* (the current date when None) formatted for *Locale*. Raises OSError on failure."""
+    buffer = create_unicode_buffer(128)
+    date = byref(lpDate) if lpDate is not None else None
+    if not kernel32.GetDateFormatW(Locale, dwFlags, date, lpFormat, buffer, len(buffer)):
+        raise WinError(get_last_error())
+    return buffer.value
+
+
+def GetTimeFormat(Locale: int, dwFlags: int, lpTime: SYSTEMTIME | None, lpFormat: str | None = None) -> str:
+    """*lpTime* (the current time when None) formatted for *Locale*. Raises OSError on failure."""
+    buffer = create_unicode_buffer(128)
+    time = byref(lpTime) if lpTime is not None else None
+    if not kernel32.GetTimeFormatW(Locale, dwFlags, time, lpFormat, buffer, len(buffer)):
+        raise WinError(get_last_error())
+    return buffer.value
 
 
 def GlobalAlloc(uFlags: int, dwBytes: int) -> int | None:
