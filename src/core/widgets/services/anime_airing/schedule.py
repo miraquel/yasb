@@ -144,7 +144,11 @@ def build_shows(snapshot: Snapshot | None, now: datetime, language: str = "romaj
         upcoming = {m.anilist_id: _next_for(m, airings.get(m.anilist_id, []), now) for m in candidates}
         far_future = datetime.max.replace(tzinfo=UTC)
 
-        def rank(media: Media, upcoming=upcoming, far_future=far_future) -> tuple[int, datetime]:
+        def rank(
+            media: Media,
+            upcoming: dict[int, tuple[int, datetime] | None] = upcoming,
+            far_future: datetime = far_future,
+        ) -> tuple[int, datetime]:
             next_up = upcoming[media.anilist_id]
             live = 0 if media.status in _LIVE_STATUSES else 1
             return (0 if next_up else 1 + live, next_up[1] if next_up else far_future)
@@ -172,7 +176,8 @@ def build_shows(snapshot: Snapshot | None, now: datetime, language: str = "romaj
 
 def upcoming_shows(shows: Iterable[Show]) -> list[Show]:
     """Shows with an episode still to come, soonest first."""
-    return sorted((show for show in shows if show.next_at is not None), key=lambda show: show.next_at)
+    timed = [(show.next_at, show) for show in shows if show.next_at is not None]
+    return [show for _, show in sorted(timed, key=lambda pair: pair[0])]
 
 
 def build_episodes(snapshot: Snapshot | None, language: str = "romaji") -> list[Episode]:

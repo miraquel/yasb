@@ -25,7 +25,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, cast
 
 MAL_LIST_URL = "https://myanimelist.net/animelist/{user}/load.json"
 MAL_PAGE_SIZE = 300
@@ -134,9 +134,9 @@ class Snapshot:
 
     username: str
     fetched_at: int
-    entries: list[ListEntry] = field(default_factory=list)
-    media: list[Media] = field(default_factory=list)
-    airings: list[Airing] = field(default_factory=list)
+    entries: list[ListEntry] = field(default_factory=list[ListEntry])
+    media: list[Media] = field(default_factory=list[Media])
+    airings: list[Airing] = field(default_factory=list[Airing])
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -146,16 +146,36 @@ class Snapshot:
         """Rebuild a cached snapshot, or None when the cache is not one this version wrote."""
         if not isinstance(data, dict):
             return None
+        cached = cast(dict[str, Any], data)
         try:
             return cls(
-                username=str(data["username"]),
-                fetched_at=int(data["fetched_at"]),
-                entries=[ListEntry(**item) for item in data.get("entries", [])],
-                media=[Media(**item) for item in data.get("media", [])],
-                airings=[Airing(**item) for item in data.get("airings", [])],
+                username=str(cached["username"]),
+                fetched_at=int(cached["fetched_at"]),
+                entries=[ListEntry(**_as_dict(item)) for item in _as_list(cached.get("entries", []))],
+                media=[Media(**_as_dict(item)) for item in _as_list(cached.get("media", []))],
+                airings=[Airing(**_as_dict(item)) for item in _as_list(cached.get("airings", []))],
             )
         except KeyError, TypeError, ValueError:
             return None
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    """*value* as a JSON object, raising ``TypeError`` when it is not one."""
+    if not isinstance(value, dict):
+        raise TypeError("expected a JSON object")
+    return cast(dict[str, Any], value)
+
+
+def _as_list(value: Any) -> list[Any]:
+    """*value* as a JSON array, raising ``TypeError`` when it is not one."""
+    if not isinstance(value, list):
+        raise TypeError("expected a JSON array")
+    return cast(list[Any], value)
+
+
+def _object(value: Any) -> dict[str, Any]:
+    """*value* as a JSON object, or an empty one when it is anything else."""
+    return cast(dict[str, Any], value) if isinstance(value, dict) else {}
 
 
 def _default_fetch(request: urllib.request.Request) -> bytes:
@@ -195,9 +215,10 @@ def parse_list_page(items: Any, list_status: str) -> list[ListEntry]:
     if not isinstance(items, list):
         raise SourceError("response", "MyAnimeList sent something other than a list")
     entries: list[ListEntry] = []
-    for item in items:
-        if not isinstance(item, dict):
+    for raw in cast(list[Any], items):
+        if not isinstance(raw, dict):
             continue
+        item = cast(dict[str, Any], raw)
         mal_id = _optional_int(item.get("anime_id"))
         if mal_id is None:
             continue
@@ -245,15 +266,14 @@ def _graphql(query: str, variables: dict[str, Any], fetch: Fetch) -> dict[str, A
         method="POST",
         headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": USER_AGENT},
     )
-    payload = _request_json(request, fetch, "AniList")
-    page = (payload.get("data") or {}).get("Page") if isinstance(payload, dict) else None
+    payload = _object(_request_json(request, fetch, "AniList"))
+    page = _object(payload.get("data")).get("Page")
     if not isinstance(page, dict):
-        errors = payload.get("errors") if isinstance(payload, dict) else None
-        message = (
-            errors[0].get("message") if isinstance(errors, list) and errors and isinstance(errors[0], dict) else ""
-        )
+        errors = payload.get("errors")
+        first: Any = cast(list[Any], errors)[0] if isinstance(errors, list) and errors else None
+        message = _object(first).get("message") or ""
         raise SourceError("response", f"AniList: {message}" if message else "AniList sent no data")
-    return page
+    return cast(dict[str, Any], page)
 
 
 def _chunks(values: Sequence[int], size: int) -> Iterable[list[int]]:
@@ -265,8 +285,10 @@ def _paged(query: str, variables: dict[str, Any], key: str, fetch: Fetch) -> lis
     rows: list[dict[str, Any]] = []
     for page_number in range(1, MAX_PAGES + 1):
         page = _graphql(query, {**variables, "page": page_number}, fetch)
-        rows.extend(row for row in (page.get(key) or []) if isinstance(row, dict))
-        if not (page.get("pageInfo") or {}).get("hasNextPage"):
+        found = page.get(key)
+        if isinstance(found, list):
+            rows.extend(cast(dict[str, Any], row) for row in cast(list[Any], found) if isinstance(row, dict))
+        if not _object(page.get("pageInfo")).get("hasNextPage"):
             break
     return rows
 
@@ -276,9 +298,9 @@ def parse_media(row: dict[str, Any]) -> Media | None:
     mal_id = _optional_int(row.get("idMal"))
     if anilist_id is None or mal_id is None:
         return None
-    title = row.get("title") or {}
-    cover = row.get("coverImage") or {}
-    upcoming = row.get("nextAiringEpisode") or {}
+    title = _object(row.get("title"))
+    cover = _object(row.get("coverImage"))
+    upcoming = _object(row.get("nextAiringEpisode"))
     return Media(
         anilist_id=anilist_id,
         mal_id=mal_id,

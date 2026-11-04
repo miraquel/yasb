@@ -1,8 +1,10 @@
 import re
+from dataclasses import dataclass
 from datetime import datetime
+from typing import override
 
 from PyQt6.QtCore import QEvent, Qt, QUrl
-from PyQt6.QtGui import QDesktopServices, QPainter, QPainterPath, QPixmap
+from PyQt6.QtGui import QCloseEvent, QDesktopServices, QMouseEvent, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from core.utils.tooltip import set_tooltip
@@ -36,6 +38,13 @@ _ERROR_TEXT = {
 }
 
 
+def _airs_at(show: Show) -> datetime:
+    """When *show*'s next episode airs. ``upcoming_shows`` keeps only shows that have one."""
+    if show.next_at is None:
+        raise ValueError(f"{show.title} has no upcoming episode")
+    return show.next_at
+
+
 class _LinkFrame(QFrame):
     """A frame that opens a URL when clicked."""
 
@@ -44,10 +53,11 @@ class _LinkFrame(QFrame):
         self.url = url
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.url:
+    @override
+    def mousePressEvent(self, a0: QMouseEvent | None) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton and self.url:
             QDesktopServices.openUrl(QUrl(self.url))
-        super().mousePressEvent(event)
+        super().mousePressEvent(a0)
 
 
 class _CoverLabel(QLabel):
@@ -66,10 +76,11 @@ class _CoverLabel(QLabel):
         self.setFixedSize(self._width, self._height)
         self._render()
 
-    def event(self, event: QEvent) -> bool:
-        if event.type() in (QEvent.Type.Show, QEvent.Type.DevicePixelRatioChange):
+    @override
+    def event(self, e: QEvent | None) -> bool:
+        if e is not None and e.type() in (QEvent.Type.Show, QEvent.Type.DevicePixelRatioChange):
             self._render()
-        return super().event(event)
+        return super().event(e)
 
     def _render(self) -> None:
         dpr = self.devicePixelRatioF()
@@ -98,6 +109,40 @@ class _CoverLabel(QLabel):
         painter.end()
         result.setDevicePixelRatio(dpr)
         self.setPixmap(result)
+
+
+@dataclass
+class _HeroWidgets:
+    """The popup's hero block: the soonest show, refreshed in place every minute."""
+
+    frame: _LinkFrame
+    cover: QLabel | None
+    title: QLabel
+    meta: QLabel
+    countdown: QLabel
+    unwatched: QLabel
+
+    def widgets(self) -> tuple[QWidget | None, ...]:
+        return (self.frame, self.cover, self.title, self.meta, self.countdown, self.unwatched)
+
+
+@dataclass
+class _RowWidgets:
+    """One show row in the popup list, refreshed in place every minute."""
+
+    row: _LinkFrame
+    cover: QLabel | None
+    title: QLabel
+    meta: QLabel
+    countdown: QLabel
+    unwatched: QLabel
+
+    def widgets(self) -> tuple[QWidget | None, ...]:
+        return (self.row, self.cover, self.title, self.meta, self.countdown, self.unwatched)
+
+
+# What the popup's structure depends on: the state class and the ids of the rows shown.
+_PopupKey = tuple[str, tuple[int, ...]]
 
 
 def _label(cls: str, text: str = "", kind: type[QLabel] = QLabel) -> QLabel:
@@ -145,9 +190,9 @@ class AnimeAiringWidget(BaseWidget):
         self._service_released = False
         self._popup: PopupWidget | None = None
         self._popup_layout: QVBoxLayout | None = None
-        self._popup_key: tuple | None = None
-        self._popup_hero: dict[str, QWidget] = {}
-        self._popup_rows: list[dict[str, QWidget]] = []
+        self._popup_key: _PopupKey | None = None
+        self._popup_hero: _HeroWidgets | None = None
+        self._popup_rows: list[_RowWidgets] = []
         self._popup_status: QLabel | None = None
 
         self._init_container()
@@ -188,9 +233,10 @@ class AnimeAiringWidget(BaseWidget):
         except RuntimeError:
             pass
 
-    def closeEvent(self, event):
+    @override
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
         self._release_service()
-        super().closeEvent(event)
+        super().closeEvent(a0)
 
     def _on_updated(self) -> None:
         self._update_label()
@@ -244,11 +290,12 @@ class AnimeAiringWidget(BaseWidget):
         states = [state] if state else []
         if not state:
             show = upcoming[0]
+            next_at = _airs_at(show)
             options["{title}"] = shorten(show.title, self.config.max_title_length)
             options["{episode}"] = str(show.next_episode or "")
-            options["{countdown}"] = format_countdown(show.next_at, now)
-            options["{air_time}"] = format_air_time(show.next_at, now)
-            if (show.next_at - now).total_seconds() <= _SOON_SECONDS:
+            options["{countdown}"] = format_countdown(next_at, now)
+            options["{air_time}"] = format_air_time(next_at, now)
+            if (next_at - now).total_seconds() <= _SOON_SECONDS:
                 states.append("soon")
             if unwatched:
                 states.append("unwatched")
@@ -271,8 +318,6 @@ class AnimeAiringWidget(BaseWidget):
                 continue
             widget = active_widgets[widget_index]
             widget_index += 1
-            if not isinstance(widget, QLabel):
-                continue
             is_icon = "<span" in part and "</span>" in part
             if is_icon:
                 part = re.sub(r"<span.*?>|</span>", "", part)
@@ -301,9 +346,10 @@ class AnimeAiringWidget(BaseWidget):
         lines = ["<strong>Next episodes</strong>"]
         for show in upcoming[: self.config.menu.max_rows]:
             unwatched = f" · {show.unwatched} new" if show.unwatched else ""
+            next_at = _airs_at(show)
             lines.append(
-                f"{show.title} · Ep {show.next_episode} · {format_air_time(show.next_at, now)}"
-                f" ({format_countdown(show.next_at, now)}){unwatched}"
+                f"{show.title} · Ep {show.next_episode} · {format_air_time(next_at, now)}"
+                f" ({format_countdown(next_at, now)}){unwatched}"
             )
         set_tooltip(self, "<br>".join(lines))
 
@@ -344,7 +390,7 @@ class AnimeAiringWidget(BaseWidget):
         self._popup = None
         self._popup_layout = None
         self._popup_key = None
-        self._popup_hero = {}
+        self._popup_hero = None
         self._popup_rows = []
         self._popup_status = None
 
@@ -359,21 +405,22 @@ class AnimeAiringWidget(BaseWidget):
         except RuntimeError:
             self._forget_popup()
 
-    def _popup_state_key(self, upcoming: list[Show]) -> tuple:
+    def _popup_state_key(self, upcoming: list[Show]) -> _PopupKey:
         """What the popup's structure depends on; when it changes the popup is rebuilt."""
         shows = tuple(show.anilist_id for show in upcoming[: self.config.menu.max_rows])
         return (self._state(upcoming)[0], shows)
 
     def _fill_popup(self, layout: QVBoxLayout) -> None:
         while layout.count():
-            old = layout.takeAt(0).widget()
+            item = layout.takeAt(0)
+            old = item.widget() if item is not None else None
             if old is not None:
                 old.setParent(None)
                 old.deleteLater()
         upcoming = self._upcoming()
         self._popup_layout = layout
         self._popup_key = self._popup_state_key(upcoming)
-        self._popup_hero = {}
+        self._popup_hero = None
         self._popup_rows = []
 
         layout.addWidget(self._build_header())
@@ -401,8 +448,8 @@ class AnimeAiringWidget(BaseWidget):
                 fit_to_width(self._popup)
             return
         now = self._now()
-        if self._popup_hero and upcoming:
-            self._fill_hero(upcoming[0], now)
+        if self._popup_hero is not None and upcoming:
+            self._fill_hero(self._popup_hero, upcoming[0], now)
         for widgets, show in zip(self._popup_rows, upcoming, strict=False):
             self._fill_row(widgets, show, now, active=show is upcoming[0])
         self._fill_status()
@@ -456,27 +503,20 @@ class AnimeAiringWidget(BaseWidget):
         text.addStretch()
         hero_layout.addLayout(text, 1)
 
-        self._popup_hero = {
-            "frame": hero,
-            "cover": cover,
-            "title": title,
-            "meta": meta,
-            "countdown": countdown,
-            "unwatched": unwatched,
-        }
+        self._popup_hero = _HeroWidgets(hero, cover, title, meta, countdown, unwatched)
         return hero
 
-    def _fill_hero(self, show: Show, now: datetime) -> None:
-        hero = self._popup_hero
-        soon = " soon" if (show.next_at - now).total_seconds() <= _SOON_SECONDS else ""
-        hero["frame"].setProperty("class", f"hero{soon}")
-        hero["frame"].url = show.url
-        hero["title"].setText(show.title)
-        hero["meta"].setText(f"Episode {show.next_episode} · {format_air_time(show.next_at, now)}")
-        hero["countdown"].setText(format_countdown(show.next_at, now))
-        hero["unwatched"].setText(self._unwatched_text(show))
-        hero["unwatched"].setVisible(bool(show.unwatched))
-        refresh_widget_style(*(w for w in hero.values() if w is not None))
+    def _fill_hero(self, hero: _HeroWidgets, show: Show, now: datetime) -> None:
+        next_at = _airs_at(show)
+        soon = " soon" if (next_at - now).total_seconds() <= _SOON_SECONDS else ""
+        hero.frame.setProperty("class", f"hero{soon}")
+        hero.frame.url = show.url
+        hero.title.setText(show.title)
+        hero.meta.setText(f"Episode {show.next_episode} · {format_air_time(next_at, now)}")
+        hero.countdown.setText(format_countdown(next_at, now))
+        hero.unwatched.setText(self._unwatched_text(show))
+        hero.unwatched.setVisible(bool(show.unwatched))
+        refresh_widget_style(*hero.widgets())
 
     @staticmethod
     def _unwatched_text(show: Show) -> str:
@@ -520,36 +560,28 @@ class AnimeAiringWidget(BaseWidget):
             row_layout.addLayout(right)
 
             rows_layout.addWidget(row)
-            self._popup_rows.append(
-                {
-                    "row": row,
-                    "cover": cover,
-                    "title": title,
-                    "meta": meta,
-                    "countdown": countdown,
-                    "unwatched": unwatched,
-                }
-            )
+            self._popup_rows.append(_RowWidgets(row, cover, title, meta, countdown, unwatched))
         return container
 
-    def _fill_row(self, widgets: dict[str, QWidget], show: Show, now: datetime, active: bool) -> None:
+    def _fill_row(self, widgets: _RowWidgets, show: Show, now: datetime, active: bool) -> None:
+        next_at = _airs_at(show)
         classes = ["show-row"]
         if active:
             classes.append("active")
-        if (show.next_at - now).total_seconds() <= _SOON_SECONDS:
+        if (next_at - now).total_seconds() <= _SOON_SECONDS:
             classes.append("soon")
         if show.unwatched:
             classes.append("unwatched")
-        widgets["row"].setProperty("class", " ".join(classes))
-        widgets["row"].url = show.url
-        widgets["title"].setText(show.title)
-        widgets["meta"].setText(f"Ep {show.next_episode} · {format_air_time(show.next_at, now)}")
-        widgets["countdown"].setText(format_countdown(show.next_at, now))
-        widgets["unwatched"].setText(f"{show.unwatched} new" if show.unwatched else "")
-        widgets["unwatched"].setVisible(bool(show.unwatched))
+        widgets.row.setProperty("class", " ".join(classes))
+        widgets.row.url = show.url
+        widgets.title.setText(show.title)
+        widgets.meta.setText(f"Ep {show.next_episode} · {format_air_time(next_at, now)}")
+        widgets.countdown.setText(format_countdown(next_at, now))
+        widgets.unwatched.setText(f"{show.unwatched} new" if show.unwatched else "")
+        widgets.unwatched.setVisible(bool(show.unwatched))
         # Descendant rules such as `.show-row.active .show-title` only re-apply once the
         # children are repolished too, not just the row whose class changed.
-        refresh_widget_style(*(w for w in widgets.values() if w is not None))
+        refresh_widget_style(*widgets.widgets())
 
     def _build_footer(self) -> QFrame:
         footer = QFrame()

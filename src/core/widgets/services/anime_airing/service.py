@@ -23,7 +23,7 @@ import xml.sax.saxutils
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 
@@ -78,9 +78,10 @@ def _read_cache(path: Path) -> dict[str, Any]:
             data = json.load(cache_file)
     except OSError, ValueError:
         return {}
-    if not isinstance(data, dict) or data.get("version") != _CACHE_VERSION:
+    if not isinstance(data, dict):
         return {}
-    return data
+    cache = cast(dict[str, Any], data)
+    return cache if cache.get("version") == _CACHE_VERSION else {}
 
 
 def _write_cache(path: Path, data: dict[str, Any]) -> None:
@@ -116,6 +117,10 @@ def _download_covers(snapshot: Snapshot) -> None:
             logger.debug("cover download failed for %s: %s", media.anilist_id, error)
 
 
+# (username, statuses, update interval, reminder settings): one service per distinct config.
+_ServiceKey = tuple[str, tuple[str, ...], int, ReminderSettings]
+
+
 class _FetchWorker(QThread):
     """Runs the blocking MAL and AniList requests off the UI thread."""
 
@@ -147,7 +152,7 @@ class AnimeAiringService(QObject):
     # Emitted after new data and on every minute tick, so widgets re-derive countdowns.
     updated = pyqtSignal()
 
-    _instances: ClassVar[dict[tuple, AnimeAiringService]] = {}
+    _instances: ClassVar[dict[_ServiceKey, AnimeAiringService]] = {}
 
     @classmethod
     def get_instance(
@@ -171,7 +176,7 @@ class AnimeAiringService(QObject):
         statuses: tuple[str, ...],
         update_interval_s: int,
         reminders: ReminderSettings,
-        key: tuple,
+        key: _ServiceKey,
     ):
         super().__init__()
         self._key = key
@@ -188,7 +193,7 @@ class AnimeAiringService(QObject):
         # already past as announced, so installing the widget does not replay the week.
         notified = cached.get("notified")
         self._notified: dict[str, int] | None = (
-            {str(k): int(v) for k, v in notified.items()} if isinstance(notified, dict) else None
+            {str(k): int(v) for k, v in cast(dict[Any, Any], notified).items()} if isinstance(notified, dict) else None
         )
         self.error_kind = ""
         self.error_text = ""
