@@ -193,14 +193,14 @@ This shows `Thu 01 Oct 09:18` and `Hari Raya Natal 85d` in the bar. With `show_n
 
 ## Calendar grid
 
-The month grid paints its own dates. Rest days (`rest_days`) and public holidays (`show_holidays`) take the rest colour, dates from the neighbouring months are muted, and today is circled. Colours come from qproperties on `.calendar-grid`; any you leave out fall back as listed:
+Rest days (`rest_days`) and public holidays (`show_holidays`) take the rest colour. The rest of the wall-calendar look is opt-in through qproperties on `.calendar-grid`: muted dates from the neighbouring months, a ring around today and a disc behind the selected date. A stylesheet that sets none of them gets the grid it had before. Any you leave out fall back as listed:
 
 | qproperty | Paints | Fallback |
 | --- | --- | --- |
-| `qproperty-textcolor` | dates | the `.calendar-table` `color` |
-| `qproperty-mutedcolor` | dates from the neighbouring months | the date colour at 35% |
+| `qproperty-textcolor` | dates | Qt's own paint (the `.calendar-table` `color`) |
+| `qproperty-mutedcolor` | dates from the neighbouring months | the date colour at 35% once `textcolor` is set; Qt's own paint otherwise |
 | `qproperty-restcolor` | rest days, holidays and their weekday names | `holiday_color` |
-| `qproperty-ringcolor` | the ring around today | the date colour |
+| `qproperty-ringcolor` | the ring around today | none: today is not circled |
 | `qproperty-selectcolor` | a disc behind the selected date | none: `::item:selected` styles the selection |
 
 Setting `selectcolor` hands the selection to the grid: the selected date gets the disc, and the accent bar Windows 11 draws beside a selected cell goes away. Without it, the selected date keeps whatever `::item:selected` gives it.

@@ -4,15 +4,16 @@ import logging
 import os
 import re
 import winsound
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import date, datetime, timedelta
 from functools import partial
 from itertools import cycle
 from types import ModuleType
-from typing import NotRequired, TypedDict, cast, override
+from typing import Any, NotRequired, TypedDict, cast, override
 from zoneinfo import ZoneInfo, available_timezones
 
-from PyQt6.QtCore import QDate, QLocale, QPoint, QRect, QRectF, Qt, QTimer, pyqtProperty
+import PyQt6.QtCore as QtCore
+from PyQt6.QtCore import QDate, QLocale, QPoint, QRect, QRectF, Qt, QTimer
 from PyQt6.QtGui import QAction, QColor, QPainter, QPalette, QPen, QShowEvent, QTextCharFormat
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
@@ -28,6 +29,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSpinBox,
+    QStyle,
     QStyleFactory,
     QTableView,
     QVBoxLayout,
@@ -73,6 +75,9 @@ _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
 _MUTED_OPACITY = 0.35
 _TODAY_RING_WIDTH = 1.5
 NOTIFICATION_SOUND = os.path.join(SCRIPT_PATH, "assets", "sound", "notification02.wav")
+
+# pyqtProperty exists at runtime but is missing from the PyQt6 type stubs
+pyqtProperty: Callable[..., Any] = getattr(QtCore, "pyqtProperty")
 
 
 class ClockWidgetSharedState:
@@ -293,41 +298,57 @@ def _get_cached_country_holidays(country: str, year: int, subdivision: str | Non
     return _holidays_cache["country_holidays"][cache_key]
 
 
-def _color_property(attr):
-    """A QColor property the stylesheet sets as ``qproperty-<name>``; an invalid colour means "use the fallback"."""
+class CustomCalendar(QCalendarWidget):
+    """Month grid with holiday and rest-day colours, and an optional wall-calendar look.
 
-    def getter(self):
-        return QColor(getattr(self, attr))
+    Rest days and holidays take ``restcolor`` (``holiday_color`` until the stylesheet sets it).
+    The stylesheet can colour the grid further through qproperties on ``.calendar-grid``:
+    ``textcolor`` and ``mutedcolor`` paint the dates (neighbouring months muted), ``ringcolor``
+    circles today and ``selectcolor`` fills a disc behind the selected date. Each one left unset
+    keeps Qt's own paint for that part, so a stylesheet without them looks as before.
+    """
 
-    def setter(self, value):
+    def _set_color(self, attr: str, value: QColor) -> None:
         setattr(self, attr, QColor(value))
         self._apply_weekday_formats()
         self.update()
 
-    return pyqtProperty(QColor, getter, setter)
+    def _get_textcolor(self) -> QColor:
+        return QColor(self._text_color)
 
+    def _set_textcolor(self, value: QColor) -> None:
+        self._set_color("_text_color", value)
 
-class CustomCalendar(QCalendarWidget):
-    """Month grid that paints its own dates.
+    textcolor: QColor = pyqtProperty(QColor, _get_textcolor, _set_textcolor)
 
-    Rest days and holidays take ``restcolor`` (``holiday_color`` until the stylesheet sets it), days
-    from the neighbouring months are muted, and today is circled. The stylesheet colours the grid
-    through qproperties on ``.calendar-grid``: ``textcolor``, ``mutedcolor``, ``restcolor``,
-    ``ringcolor`` and ``selectcolor``, which fills a disc behind the selected date (unset, the
-    ``::item:selected`` rule draws the selection instead).
-    """
+    def _get_mutedcolor(self) -> QColor:
+        return QColor(self._muted_color)
 
-    textcolor = _color_property("_text_color")
-    mutedcolor = _color_property("_muted_color")
-    restcolor = _color_property("_rest_color")
-    ringcolor = _color_property("_ring_color")
+    def _set_mutedcolor(self, value: QColor) -> None:
+        self._set_color("_muted_color", value)
 
-    @pyqtProperty(QColor)
-    def selectcolor(self):
+    mutedcolor: QColor = pyqtProperty(QColor, _get_mutedcolor, _set_mutedcolor)
+
+    def _get_restcolor(self) -> QColor:
+        return QColor(self._rest_color)
+
+    def _set_restcolor(self, value: QColor) -> None:
+        self._set_color("_rest_color", value)
+
+    restcolor: QColor = pyqtProperty(QColor, _get_restcolor, _set_restcolor)
+
+    def _get_ringcolor(self) -> QColor:
+        return QColor(self._ring_color)
+
+    def _set_ringcolor(self, value: QColor) -> None:
+        self._set_color("_ring_color", value)
+
+    ringcolor: QColor = pyqtProperty(QColor, _get_ringcolor, _set_ringcolor)
+
+    def _get_selectcolor(self) -> QColor:
         return QColor(self._select_color)
 
-    @selectcolor.setter
-    def selectcolor(self, value):
+    def _set_selectcolor(self, value: QColor) -> None:
         self._select_color = QColor(value)
         table_view = self.findChild(QTableView)
         if self._select_color.isValid() and table_view and self._grid_style is None:
@@ -338,6 +359,8 @@ class CustomCalendar(QCalendarWidget):
             if self._grid_style is not None:
                 table_view.setStyle(self._grid_style)
         self.update()
+
+    selectcolor: QColor = pyqtProperty(QColor, _get_selectcolor, _set_selectcolor)
 
     def __init__(
         self,
@@ -357,7 +380,7 @@ class CustomCalendar(QCalendarWidget):
         self._rest_color = QColor(holiday_color) if holiday_color else QColor()
         self._ring_color = QColor()
         self._select_color = QColor()
-        self._grid_style = None
+        self._grid_style: QStyle | None = None
         self.timezone = timezone
         self.country_code = country_code
         self.subdivision = subdivision
@@ -404,7 +427,7 @@ class CustomCalendar(QCalendarWidget):
         if year != self._current_year:
             self._update_holidays_for_year(year)
 
-    def _apply_weekday_formats(self):
+    def _apply_weekday_formats(self) -> None:
         """Give the rest days' weekday names the rest colour; the other names keep the stylesheet's."""
         for day in range(Qt.DayOfWeek.Monday.value, Qt.DayOfWeek.Sunday.value + 1):
             weekday_format = QTextCharFormat(self._plain_weekday_format)
@@ -412,53 +435,61 @@ class CustomCalendar(QCalendarWidget):
                 weekday_format.setForeground(self._rest_color)
             self.setWeekdayTextFormat(Qt.DayOfWeek(day), weekday_format)
 
-    def _today(self):
+    def _today(self) -> QDate:
         now = datetime.now(ZoneInfo(self.timezone)) if self.timezone else datetime.now().astimezone()
         return QDate(now.year, now.month, now.day)
 
     @override
     def paintCell(self, painter: QPainter | None, rect: QRect, date: QDate | date) -> None:
-        """Paint one date: rest days and holidays in the rest colour, other months muted, today circled."""
+        """Paint one date: rest days and holidays in the rest colour; the qproperties add the rest of the look."""
         qdate = date if isinstance(date, QDate) else QDate(date.year, date.month, date.day)
         if painter is None or qdate < self.minimumDate() or qdate > self.maximumDate():
             return
         is_rest = qdate.dayOfWeek() in self.rest_days or (self.show_holidays and qdate.toPyDate() in self._holidays)
-        # The incoming pen carries the stylesheet's .calendar-table colour.
-        text_color = QColor(self._text_color) if self._text_color.isValid() else painter.pen().color()
-        color = QColor(self._rest_color) if is_rest and self._rest_color.isValid() else QColor(text_color)
-        if (qdate.year(), qdate.month()) != (self.yearShown(), self.monthShown()):
-            if self._muted_color.isValid() and not is_rest:
-                color = QColor(self._muted_color)
-            else:
-                opacity = self._muted_color.alphaF() if self._muted_color.isValid() else _MUTED_OPACITY
-                color.setAlphaF(color.alphaF() * opacity)
-
-        side = min(rect.width(), rect.height()) - 4
-        circle = QRectF(0, 0, side, side)
-        circle.moveCenter(QRectF(rect).center())
         selected = qdate == self.selectedDate()
-        # Without selectcolor, Qt paints the selected date in the theme's ::item:selected colours, as before.
-        theme_selected = selected and not self._select_color.isValid()
-        if theme_selected:
+        own_selection = selected and self._select_color.isValid()
+        grid_colors = self._text_color.isValid() or self._muted_color.isValid()
+        own_text = own_selection or (not selected and (is_rest or grid_colors))
+        if not own_text:
+            # Qt's own paint: plain dates while no grid colour is set, and the selected date without
+            # selectcolor, which keeps the theme's ::item:selected colours.
             painter.save()
             super().paintCell(painter, rect, date)
             painter.restore()
 
+        side = min(rect.width(), rect.height()) - 4
+        circle = QRectF(0, 0, side, side)
+        circle.moveCenter(QRectF(rect).center())
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if selected and not theme_selected:
+        if own_selection:
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(self._select_color)
             painter.drawEllipse(circle)
-        if qdate == self._today():
-            ring = QColor(self._ring_color) if self._ring_color.isValid() else text_color
-            painter.setPen(QPen(ring, _TODAY_RING_WIDTH))
+        if self._ring_color.isValid() and qdate == self._today():
+            painter.setPen(QPen(self._ring_color, _TODAY_RING_WIDTH))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(circle)
-        if not theme_selected:
-            painter.setPen(color)
+        if own_text:
+            painter.setPen(self._date_color(qdate, is_rest, painter.pen().color()))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(qdate.day()))
         painter.restore()
+
+    def _date_color(self, qdate: QDate, is_rest: bool, pen_color: QColor) -> QColor:
+        """The colour of a date the grid paints itself; *pen_color* carries the .calendar-table colour."""
+        grid_colors = self._text_color.isValid() or self._muted_color.isValid()
+        text_color = QColor(self._text_color) if self._text_color.isValid() else QColor(pen_color)
+        color = QColor(self._rest_color) if is_rest and self._rest_color.isValid() else text_color
+        if (qdate.year(), qdate.month()) == (self.yearShown(), self.monthShown()):
+            return color
+        if self._muted_color.isValid() and not is_rest:
+            return QColor(self._muted_color)
+        if is_rest and not grid_colors:
+            # Without grid colours, holidays from the neighbouring months stay unmuted, as before.
+            return color
+        opacity = self._muted_color.alphaF() if self._muted_color.isValid() else _MUTED_OPACITY
+        color.setAlphaF(color.alphaF() * opacity)
+        return color
 
     def update_calendar_display(self):
         """Set the calendar selected date according to the configured timezone."""
@@ -491,8 +522,8 @@ class ClockWidget(BaseWidget):
         self._current_minute: str | None = None
         self._previous_alarm_state = False
         self._timer_visible = False
-        self._next_holiday_cache = None
-        self._next_holiday_popup = None
+        self._next_holiday_cache: tuple[date, tuple[date, str] | None] | None = None
+        self._next_holiday_popup: tuple[QLabel, date] | None = None
         self._country_code = self.config.calendar.country_code or self.get_country_code()
         self._subdivision = self.config.calendar.subdivision
         self._init_container()
@@ -529,7 +560,7 @@ class ClockWidget(BaseWidget):
         if self._wants_holidays():
             QTimer.singleShot(0, _get_holidays_module)
 
-    def _wants_holidays(self):
+    def _wants_holidays(self) -> bool:
         """True when any holiday feature is on: grid highlighting, the next-holiday block or a label placeholder."""
         labels = f"{self.config.label}{self.config.label_alt}"
         return (
@@ -538,7 +569,7 @@ class ClockWidget(BaseWidget):
             or any(token in labels for token in _HOLIDAY_TOKENS)
         )
 
-    def _get_next_holiday(self, today):
+    def _get_next_holiday(self, today: date) -> tuple[date, str] | None:
         """Return the nearest ``(date, name)`` on or after *today* for the configured country, cached per day."""
         if self._next_holiday_cache and self._next_holiday_cache[0] == today:
             return self._next_holiday_cache[1]
@@ -549,17 +580,17 @@ class ClockWidget(BaseWidget):
         self._next_holiday_cache = (today, result)
         return result
 
-    def _find_next_holiday(self, today):
+    def _find_next_holiday(self, today: date) -> tuple[date, str] | None:
         """Uncached lookup behind _get_next_holiday; None until the holidays module has loaded."""
         country = _supported_country(self._country_code)
         if not country:
             return None
-        holidays = {}
+        holidays: dict[date, str] = {}
         for year in (today.year, today.year + 1):
             holidays.update(_get_cached_country_holidays(country, year, self._subdivision))
         return find_next_holiday(holidays, today)
 
-    def _replace_holiday_tokens(self, text, now):
+    def _replace_holiday_tokens(self, text: str, now: datetime) -> tuple[str, bool]:
         """Fill the holiday placeholders in *text*; returns the text and whether a holiday was found."""
         next_holiday = self._get_next_holiday(now.date())
         if next_holiday is None:
@@ -571,7 +602,7 @@ class ClockWidget(BaseWidget):
         text = text.replace("{holiday_countdown}", countdown).replace("{holiday}", name)
         return text, next_holiday is not None
 
-    def _refresh_next_holiday_popup(self, now):
+    def _refresh_next_holiday_popup(self, now: datetime) -> None:
         """Keep the open calendar popup's countdown current."""
         if self._next_holiday_popup is None:
             return
@@ -907,13 +938,13 @@ class ClockWidget(BaseWidget):
         return None
 
     @staticmethod
-    def _next_holiday_countdown(now, day):
+    def _next_holiday_countdown(now: datetime, day: date) -> str:
         """The block's first line, which leads into the name below it: ``85 days until``, or ``Today``."""
         if day <= now.date():
             return "Today"
         return f"{format_countdown(now, day, long=True)} until"
 
-    def _add_next_holiday_block(self, layout, now, qlocale):
+    def _add_next_holiday_block(self, layout: QVBoxLayout, now: datetime, qlocale: QLocale) -> None:
         """Add the nearest holiday under the popup's date panel: how long, what, and when, one line each."""
         next_holiday = self._get_next_holiday(now.date())
         if next_holiday and next_holiday[0] == now.date() and self.config.calendar.show_holidays:
