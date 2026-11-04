@@ -1,3 +1,5 @@
+# pyright: reportPrivateUsage=false
+
 """Widget tests for the Outlook calendar: config, bar label states, tooltip and the popup.
 
 The widget gets a stub service holding a snapshot, so no COM is touched. The popup body is
@@ -8,6 +10,7 @@ import sys
 import unittest
 from datetime import datetime
 from pathlib import Path
+from typing import Any, override
 from unittest import mock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +24,8 @@ from PyQt6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, pyqtSignal  # noq
 from PyQt6.QtGui import QMouseEvent  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QPushButton, QVBoxLayout, QWidget  # noqa: E402
 
-APP = QApplication.instance() or QApplication([])
+_existing = QApplication.instance()
+APP = _existing if isinstance(_existing, QApplication) else QApplication([])
 
 from core.validation.widgets.yasb.outlook_calendar import OutlookCalendarConfig  # noqa: E402
 from core.widgets.services.outlook_calendar.agenda import CalEvent, Snapshot  # noqa: E402
@@ -37,7 +41,7 @@ def at(day: int, hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 10, day, hour, minute)
 
 
-def ev(start: datetime, end: datetime, subject: str = "Meeting", **fields) -> CalEvent:
+def ev(start: datetime, end: datetime, subject: str = "Meeting", **fields: Any) -> CalEvent:
     return CalEvent(start=start, end=end, subject=subject, **fields)
 
 
@@ -60,8 +64,16 @@ def press() -> QMouseEvent:
     )
 
 
+def classes_of(widget: QWidget) -> list[str]:
+    return str(widget.property("class") or "").split()
+
+
 def by_class(root: QWidget, cls: str) -> list[QWidget]:
-    return [child for child in root.findChildren(QWidget) if cls in (child.property("class") or "").split()]
+    return [child for child in root.findChildren(QWidget) if cls in classes_of(child)]
+
+
+def labels_by_class(root: QWidget, cls: str) -> list[QLabel]:
+    return [child for child in root.findChildren(QLabel) if cls in classes_of(child)]
 
 
 class StubService(QObject):
@@ -72,28 +84,29 @@ class StubService(QObject):
         self.snapshot = snapshot
         self.refreshes = 0
 
-    def refresh_now(self):
+    def refresh_now(self) -> None:
         self.refreshes += 1
 
-    def release(self):
+    def release(self) -> None:
         pass
 
 
 class _FakePopup(QFrame):
-    def __init__(self, parent, *args):
+    def __init__(self, parent: QWidget, *args: object):
         super().__init__()
 
-    def setPosition(self, **kwargs):
+    def setPosition(self, **kwargs: object) -> None:
         pass
 
-    def show(self):
+    @override
+    def show(self) -> None:
         pass
 
 
 class WidgetTestCase(unittest.TestCase):
-    def make(self, snapshot: Snapshot, now: datetime = NOW, **options) -> OutlookCalendarWidget:
+    def make(self, snapshot: Snapshot, now: datetime = NOW, **options: Any) -> OutlookCalendarWidget:
         self.stub = StubService(snapshot)
-        config = OutlookCalendarConfig(**options)
+        config = OutlookCalendarConfig.model_validate(options)
         with mock.patch.object(widget_module.OutlookCalendarService, "get_instance", return_value=self.stub):
             widget = OutlookCalendarWidget(config)
         widget._now = lambda: now
@@ -107,7 +120,7 @@ class WidgetTestCase(unittest.TestCase):
 
     @staticmethod
     def classes(widget: OutlookCalendarWidget) -> list[str]:
-        return (widget._widgets[1].property("class") or "").split()
+        return classes_of(widget._widgets[1])
 
 
 class ConfigTests(unittest.TestCase):
@@ -120,9 +133,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.callbacks.on_middle, "open_outlook")
 
     def test_rejects_out_of_range(self):
-        for options in ({"update_interval": 30}, {"days": 0}, {"days": 32}, {"soon_minutes": -1}):
+        cases: tuple[dict[str, int], ...] = ({"update_interval": 30}, {"days": 0}, {"days": 32}, {"soon_minutes": -1})
+        for options in cases:
             with self.assertRaises(ValidationError):
-                OutlookCalendarConfig(**options)
+                OutlookCalendarConfig.model_validate(options)
 
     def test_time_format_must_work_with_windows_strftime(self):
         with self.assertRaises(ValidationError):
@@ -131,7 +145,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_rejects_unknown_options(self):
         with self.assertRaises(ValidationError):
-            OutlookCalendarConfig(label_empty="x")
+            OutlookCalendarConfig.model_validate({"label_empty": "x"})
 
 
 class LabelTests(WidgetTestCase):
@@ -165,7 +179,7 @@ class LabelTests(WidgetTestCase):
         self.assertEqual(self.text(widget), "in 2h · Quarterly…")
 
     def test_states_replace_the_template(self):
-        cases = [
+        cases: list[tuple[Snapshot, str, str]] = [
             (live(), "No events", "empty"),
             (Snapshot(), "Outlook closed", "closed"),
             (Snapshot((), None, "error"), "Outlook unavailable", "error"),
@@ -207,17 +221,19 @@ class LabelTests(WidgetTestCase):
             live(ev(at(1, 11), at(1, 12), "Quarterly planning with the finance team")), max_title_length=0
         )
         label = widget._widgets[1]
-        label.setStyleSheet("max-width: 120px;")
+        # Sized from the font in use: offscreen Qt (CI) has no Windows fonts and draws text wider.
+        slot = label.fontMetrics().horizontalAdvance("in 2h · Quarterly plan")
+        label.setStyleSheet(f"max-width: {slot}px;")
         widget._update_label()
         text = label.text()
         self.assertTrue(text.startswith("in 2h · Quarterly"), text)
         self.assertTrue(text.endswith("…"), text)
-        self.assertLessEqual(label.fontMetrics().horizontalAdvance(text), 120)
+        self.assertLessEqual(label.fontMetrics().horizontalAdvance(text), slot)
 
     def test_empty_text_blank_leaves_only_the_icon(self):
         widget = self.make(live(), empty_text="")
         self.assertFalse(widget._widgets[1].isVisibleTo(widget))
-        self.assertIn("empty", (widget._widgets[0].property("class") or "").split())
+        self.assertIn("empty", classes_of(widget._widgets[0]))
 
     def test_text_is_untouched_without_a_fixed_width(self):
         widget = self.make(
@@ -234,7 +250,7 @@ class LabelTests(WidgetTestCase):
 
 
 class TooltipTests(WidgetTestCase):
-    def tooltip(self, snapshot: Snapshot, **options) -> str:
+    def tooltip(self, snapshot: Snapshot, **options: Any) -> str:
         with mock.patch.object(widget_module, "set_tooltip") as set_tooltip:
             self.make(snapshot, **options)
         return set_tooltip.call_args.args[1]
@@ -281,7 +297,7 @@ class PopupTests(WidgetTestCase):
 
     @staticmethod
     def texts(root: QWidget, cls: str) -> list[str]:
-        return [label.text() for label in by_class(root, cls)]
+        return [label.text() for label in labels_by_class(root, cls)]
 
     def test_groups_rows_by_day(self):
         snapshot = live(
@@ -338,7 +354,7 @@ class PopupTests(WidgetTestCase):
         opener.assert_not_called()
 
     def test_empty_and_closed(self):
-        cases = [
+        cases: list[tuple[Snapshot, dict[str, Any], str]] = [
             (live(), {}, "Nothing in the next 7 days"),
             (live(), {"days": 1}, "Nothing today"),
             (Snapshot(), {}, "Outlook closed"),
@@ -363,13 +379,13 @@ class PopupTests(WidgetTestCase):
 
     def test_stale_status_line(self):
         host = self.fill(self.make(Snapshot((ev(at(1, 11), at(1, 12)),), FETCHED, "stale")))
-        status = by_class(host, "status")[0]
+        status = labels_by_class(host, "status")[0]
         self.assertEqual(status.text(), "Outlook closed · cached 08:12")
         self.assertEqual(status.property("class"), "status stale")
 
     def test_time_column_is_aligned(self):
         host = self.fill(self.make(live(all_day(1, 1), ev(at(1, 11), at(1, 12)))))
-        widths = {label.minimumWidth() for label in by_class(host, "time")}
+        widths = {label.minimumWidth() for label in labels_by_class(host, "time")}
         self.assertEqual(len(widths), 1)
         self.assertGreater(widths.pop(), 0)
 
@@ -393,16 +409,17 @@ class PopupTests(WidgetTestCase):
         APP.processEvents()
 
         def baseline(row: QWidget, cls: str) -> int:
-            label = by_class(row, cls)[0]
+            label = labels_by_class(row, cls)[0]
             metrics = label.fontMetrics()
             return label.mapTo(row, QPoint(0, 0)).y() + (label.height() - metrics.height()) // 2 + metrics.ascent()
 
         for row in by_class(host, "event-row"):
-            self.assertLessEqual(abs(baseline(row, "time") - baseline(row, "subject")), 1, row.findChild(QLabel).text())
+            subject = labels_by_class(row, "subject")[0].text()
+            self.assertLessEqual(abs(baseline(row, "time") - baseline(row, "subject")), 1, subject)
 
     def test_subject_in_popup_is_plain_text(self):
         host = self.fill(self.make(live(ev(at(1, 11), at(1, 12), "Review <draft>"))))
-        subject = by_class(host, "subject")[0]
+        subject = labels_by_class(host, "subject")[0]
         self.assertEqual((subject.text(), subject.textFormat()), ("Review <draft>", Qt.TextFormat.PlainText))
 
     def test_opening_the_popup_refreshes(self):
@@ -417,10 +434,10 @@ class PopupTests(WidgetTestCase):
         self.addCleanup(host.deleteLater)
         layout = QVBoxLayout(host)
         widget._fill_popup(layout)
-        host.isVisible = lambda: True
         widget._popup, widget._popup_layout = host, layout
         self.stub.snapshot = live(ev(at(1, 11), at(1, 12), "New"))
-        self.stub.updated.emit()
+        with mock.patch.object(host, "isVisible", return_value=True):
+            self.stub.updated.emit()
         self.assertEqual(self.texts(host, "subject"), ["New"])
 
 

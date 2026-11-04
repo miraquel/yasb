@@ -14,7 +14,7 @@ import urllib.parse
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 # OlBusyStatus values.
 BUSY_FREE = 0
@@ -231,8 +231,8 @@ def find_join_url(text: str) -> str:
     """The first Teams, Zoom or Google Meet link in *text*, unwrapped from Safe Links."""
     if not text:
         return ""
-    for wrapped in _SAFELINKS_RE.findall(text):
-        query = urllib.parse.parse_qs(urllib.parse.urlsplit(wrapped).query)
+    for wrapped in _SAFELINKS_RE.finditer(text):
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(wrapped.group(0)).query)
         target = query.get("url", [""])[0]
         match = _JOIN_RE.match(target)
         if match:
@@ -265,11 +265,15 @@ def snapshot_to_cache(snapshot: Snapshot) -> dict[str, Any]:
 
 def snapshot_from_cache(data: Any) -> Snapshot | None:
     """A cached snapshot, marked stale; None unless *data* is a cache this version wrote."""
-    if not isinstance(data, dict) or data.get("version") != CACHE_VERSION:
+    if not isinstance(data, dict):
+        return None
+    cache = cast(dict[str, Any], data)
+    if cache.get("version") != CACHE_VERSION:
         return None
     try:
-        events = tuple(CalEvent.from_dict(item) for item in data.get("events") or [])
-        fetched = data.get("fetched_at")
+        items: list[Any] = cache.get("events") or []
+        events = tuple(CalEvent.from_dict(item) for item in items)
+        fetched = cache.get("fetched_at")
         fetched_at = datetime.fromisoformat(fetched) if fetched else None
     except KeyError, TypeError, ValueError, AttributeError:
         return None

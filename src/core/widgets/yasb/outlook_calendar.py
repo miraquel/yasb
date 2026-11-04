@@ -7,10 +7,13 @@ the wall clock on every service update, at least every 30 seconds.
 
 import html
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta
+from functools import partial
+from typing import override
 
 from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QCloseEvent, QDesktopServices, QMouseEvent
 from PyQt6.QtWidgets import (
     QWIDGETSIZE_MAX,
     QFrame,
@@ -78,9 +81,10 @@ def _open_url(url: str) -> None:
 class _EventRow(QFrame):
     """A popup row that hands its event to *on_click* when clicked."""
 
-    def __init__(self, event: CalEvent, on_click, parent: QWidget | None = None):
+    def __init__(self, event: CalEvent, on_click: Callable[[CalEvent], None], parent: QWidget | None = None):
         super().__init__(parent)
-        self.event = event
+        # Not "event": that would shadow QWidget.event(), which Qt calls for every event.
+        self.cal_event = event
         self._on_click = on_click
         self.time_label: QLabel
         self.subject: QLabel
@@ -88,10 +92,11 @@ class _EventRow(QFrame):
         self.text_gap: QSpacerItem
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def mousePressEvent(self, mouse_event):
-        if mouse_event.button() == Qt.MouseButton.LeftButton:
-            self._on_click(self.event)
-        super().mousePressEvent(mouse_event)
+    @override
+    def mousePressEvent(self, a0: QMouseEvent | None) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
+            self._on_click(self.cal_event)
+        super().mousePressEvent(a0)
 
 
 class OutlookCalendarWidget(BaseWidget):
@@ -139,9 +144,10 @@ class OutlookCalendarWidget(BaseWidget):
         except RuntimeError:
             pass
 
-    def closeEvent(self, event):
+    @override
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
         self._release_service()
-        super().closeEvent(event)
+        super().closeEvent(a0)
 
     def _on_updated(self) -> None:
         self._update_label()
@@ -364,7 +370,8 @@ class OutlookCalendarWidget(BaseWidget):
 
     def _fill_popup(self, layout: QVBoxLayout) -> None:
         while layout.count():
-            old = layout.takeAt(0).widget()
+            taken = layout.takeAt(0)
+            old = taken.widget() if taken is not None else None
             if old is not None:
                 old.setParent(None)
                 old.deleteLater()
@@ -419,7 +426,9 @@ class OutlookCalendarWidget(BaseWidget):
         shift = cls._baseline(row.subject) - cls._baseline(row.time_label)
         row.time_gap.changeSize(0, max(shift, 0))
         row.text_gap.changeSize(0, max(-shift, 0))
-        row.layout().invalidate()
+        row_layout = row.layout()
+        if row_layout is not None:
+            row_layout.invalidate()
 
     @staticmethod
     def _align(labels: list[QLabel]) -> None:
@@ -460,7 +469,7 @@ class OutlookCalendarWidget(BaseWidget):
         placeholder.setWordWrap(True)
         return placeholder
 
-    def _build_row(self, event: CalEvent, now: datetime) -> tuple[QFrame, QLabel]:
+    def _build_row(self, event: CalEvent, now: datetime) -> tuple[_EventRow, QLabel]:
         time_format = self.config.time_format
         classes = ["event-row"]
         if event.all_day:
@@ -512,6 +521,6 @@ class OutlookCalendarWidget(BaseWidget):
             join = QPushButton("Join")
             join.setProperty("class", "join")
             join.setCursor(Qt.CursorShape.PointingHandCursor)
-            join.clicked.connect(lambda _checked=False, url=event.join_url: self._join(url))
+            join.clicked.connect(partial(self._join, event.join_url))
             row_layout.addWidget(join, alignment=Qt.AlignmentFlag.AlignVCenter)
         return row, time_label

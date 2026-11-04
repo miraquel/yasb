@@ -10,6 +10,7 @@ import unittest
 import urllib.parse
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -46,8 +47,14 @@ def at(day: int, hour: int, minute: int = 0, second: int = 0) -> datetime:
     return datetime(2026, 10, day, hour, minute, second)
 
 
-def ev(start: datetime, end: datetime, subject: str = "Meeting", **fields) -> CalEvent:
+def ev(start: datetime, end: datetime, subject: str = "Meeting", **fields: Any) -> CalEvent:
     return CalEvent(start=start, end=end, subject=subject, **fields)
+
+
+def chosen_subject(events: list[CalEvent]) -> str:
+    chosen = select_event(events, NOW)
+    assert chosen is not None
+    return chosen.subject
 
 
 def all_day(first: int, last: int, subject: str = "Holiday") -> CalEvent:
@@ -58,15 +65,15 @@ def all_day(first: int, last: int, subject: str = "Holiday") -> CalEvent:
 class SelectEventTests(unittest.TestCase):
     def test_next_timed_event(self):
         events = [ev(at(1, 14), at(1, 15), "Weekly sync"), ev(at(1, 11), at(1, 12), "Standup")]
-        self.assertEqual(select_event(events, NOW).subject, "Standup")
+        self.assertEqual(chosen_subject(events), "Standup")
 
     def test_ongoing_wins_over_next(self):
         events = [ev(at(1, 9, 15), at(1, 9, 45), "Call"), ev(at(1, 8, 30), at(1, 9, 30), "Vendor review")]
-        self.assertEqual(select_event(events, NOW).subject, "Vendor review")
+        self.assertEqual(chosen_subject(events), "Vendor review")
 
     def test_overlapping_ongoing_events_pick_the_one_ending_first(self):
         events = [ev(at(1, 8), at(1, 11), "Workshop"), ev(at(1, 8, 30), at(1, 9, 30), "Check-in")]
-        self.assertEqual(select_event(events, NOW).subject, "Check-in")
+        self.assertEqual(chosen_subject(events), "Check-in")
 
     def test_free_all_day_and_declined_are_skipped(self):
         events = [
@@ -75,7 +82,7 @@ class SelectEventTests(unittest.TestCase):
             ev(at(1, 10), at(1, 11), "Declined", response=4),
             ev(at(2, 10), at(2, 11), "Tomorrow"),
         ]
-        self.assertEqual(select_event(events, NOW).subject, "Tomorrow")
+        self.assertEqual(chosen_subject(events), "Tomorrow")
 
     def test_unanswered_invite_counts_and_is_tentative(self):
         invite = ev(at(1, 10), at(1, 11), "Invite", busy=1, response=5)
@@ -109,8 +116,8 @@ class TodayCountTests(unittest.TestCase):
 
 
 class CountdownTests(unittest.TestCase):
-    def countdown(self, start: datetime, now: datetime = NOW, **kwargs) -> str:
-        return format_countdown(ev(start, start + timedelta(minutes=30)), now, **kwargs)
+    def countdown(self, start: datetime, now: datetime = NOW, time_format: str = "%H:%M") -> str:
+        return format_countdown(ev(start, start + timedelta(minutes=30)), now, time_format)
 
     def test_minutes_round_up(self):
         self.assertEqual(self.countdown(NOW + timedelta(minutes=24, seconds=10)), "in 25m")
@@ -271,17 +278,20 @@ class CacheTests(unittest.TestCase):
     def test_survives_json(self):
         snapshot = Snapshot((ev(at(1, 14), at(1, 15), "Sync"),), at(1, 8, 12), "live")
         data = json.loads(json.dumps(snapshot_to_cache(snapshot)))
-        self.assertEqual(snapshot_from_cache(data).events, snapshot.events)
+        restored = snapshot_from_cache(data)
+        assert restored is not None
+        self.assertEqual(restored.events, snapshot.events)
 
     def test_rejects_other_versions_and_garbage(self):
-        for data in (
+        cases: tuple[object, ...] = (
             None,
             [],
             "x",
             {"version": 99, "events": []},
             {"version": 1, "events": [{"start": "nope"}]},
             {"version": 1, "events": "x"},
-        ):
+        )
+        for data in cases:
             self.assertIsNone(snapshot_from_cache(data), data)
 
 

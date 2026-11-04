@@ -1,3 +1,5 @@
+# pyright: reportPrivateUsage=false
+
 """Tests for the shared Outlook calendar service: the cache, the snapshot states, and one
 service shared by every bar. Polling is switched off and results are fed in directly."""
 
@@ -6,6 +8,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -107,7 +110,7 @@ class SnapshotStateTests(ServiceTestCase):
 
     def test_every_result_emits_updated(self):
         service = self.make()
-        seen = []
+        seen: list[str] = []
         service.updated.connect(lambda: seen.append(service.snapshot.status))
         service._on_done(None, "closed")
         service._on_done([EVENT], "")
@@ -137,7 +140,7 @@ class SnapshotStateTests(ServiceTestCase):
 
     def test_every_tick_emits_updated(self):
         service = self.make()
-        seen = []
+        seen: list[int] = []
         service.updated.connect(lambda: seen.append(1))
         service._on_tick()
         service._on_done(None, "closed")
@@ -179,8 +182,8 @@ class SharedInstanceTests(ServiceTestCase):
         self.addCleanup(patcher.stop)
         self.addCleanup(setattr, OutlookCalendarService, "_instance", None)
 
-    def get(self, *args) -> OutlookCalendarService:
-        service = OutlookCalendarService.get_instance(*args)
+    def get(self, days: int, update_interval_s: int, scan_body: bool) -> OutlookCalendarService:
+        service = OutlookCalendarService.get_instance(days, update_interval_s, scan_body)
         self.addCleanup(self.stop, service)
         return service
 
@@ -242,10 +245,14 @@ class SharedInstanceTests(ServiceTestCase):
 
 
 class WorkerTests(unittest.TestCase):
-    def run_worker(self, **fetch_patch) -> list[tuple]:
+    def run_worker(self, **fetch_patch: Any) -> list[tuple[object, str]]:
         worker = service_module._FetchWorker(7, True)
-        results = []
-        worker.done.connect(lambda events, failure: results.append((events, failure)))
+        results: list[tuple[object, str]] = []
+
+        def record(events: object, failure: str) -> None:
+            results.append((events, failure))
+
+        worker.done.connect(record)
         with mock.patch.object(service_module, "fetch", **fetch_patch):
             worker.run()
         return results
