@@ -68,6 +68,15 @@ def create_dispatch(progid: str) -> Any:
     return comtypes.client.CreateObject(progid, dynamic=True)
 
 
+def get_active_dispatch(progid: str) -> Any:
+    """The late-bound object for *progid* that is already running, from the Running Object Table.
+
+    Never starts the server. Raises OSError when none is registered as running (MK_E_UNAVAILABLE)
+    or *progid* is not installed (CO_E_CLASSSTRING); the HRESULT is the error's ``winerror``.
+    """
+    return comtypes.client.GetActiveObject(progid, dynamic=True)
+
+
 def get_dispatch(display_name: str) -> Any:
     """The late-bound object a moniker display name names, such as "winmgmts:"."""
     return comtypes.client.CoGetObject(display_name, dynamic=True)
