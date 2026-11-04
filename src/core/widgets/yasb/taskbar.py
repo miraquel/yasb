@@ -53,11 +53,11 @@ from core.utils.win32.window_actions import (
     set_foreground,
     show_window,
 )
-from core.validation.widgets.yasb.taskbar import TaskbarConfig
+from core.validation.widgets.yasb.taskbar import BadgeConfig, TaskbarConfig
 from core.widgets.base import BaseWidget
 from core.widgets.services.recycle_bin.recycle_bin_monitor import RecycleBinMonitor
 from core.widgets.services.taskbar.app_menu import show_context_menu
-from core.widgets.services.taskbar.overlay_monitor import TaskbarNotificationMonitor
+from core.widgets.services.taskbar.overlay_monitor import TaskbarNotificationMonitor, match_notification_count
 from core.widgets.services.taskbar.pin_manager import PinManager
 from core.widgets.services.taskbar.thumbnail import TaskbarThumbnailManager
 
@@ -81,13 +81,13 @@ class FlashTimer(QTimer):
 class BadgeLabel(QLabel):
     """A QLabel subclass that paints a notification badge (dot or number) overlay on top of the icon."""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
         self._show_badge = False
         self._badge_count = 0
-        self._badge_cfg = None  # will be set to BadgeConfig instance
+        self._badge_cfg: BadgeConfig | None = None
 
-    def configure(self, badge_cfg) -> None:
+    def configure(self, badge_cfg: BadgeConfig) -> None:
         """Attach a BadgeConfig instance so paintEvent knows how to render."""
         self._badge_cfg = badge_cfg
 
@@ -2184,7 +2184,7 @@ class TaskbarWidget(BaseWidget):
             logging.warning("TaskbarWidget: failed to start overlay monitor: %s", exc)
             self._overlay_monitor = None
 
-    def _on_overlay_counts_updated(self, counts: dict) -> None:
+    def _on_overlay_counts_updated(self, counts: dict[str, int]) -> None:
         """Slot called when the notification monitor emits a new snapshot.
 
         ``counts`` is ``{app_display_name_lower: unread_count}``.
@@ -2200,21 +2200,7 @@ class TaskbarWidget(BaseWidget):
             return 0
         app_window = self.task_manager.get_window(hwnd) if self.task_manager else None
         process_name = app_window.process_name if app_window is not None else None
-        if process_name is None:
-            return 0
-        try:
-            # Primary key: process name without extension, e.g. "WhatsApp.exe" → "whatsapp"
-            key = process_name.lower().replace(".exe", "").strip()
-            count = self._notification_counts.get(key, 0)
-            if count > 0:
-                return count
-            # Fuzzy fallback: notification app name is a substring of process key (or vice-versa)
-            for app_name, c in self._notification_counts.items():
-                if app_name and (app_name in key or key in app_name):
-                    return c
-        except Exception:
-            pass
-        return 0
+        return match_notification_count(process_name, self._notification_counts)
 
     def _update_badge_for_hwnd(self, hwnd: int) -> None:
         """Central badge update: reconcile flash state + notification count for *hwnd*.

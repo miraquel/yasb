@@ -22,9 +22,50 @@ Access requirement:
 
 import asyncio
 import logging
+from collections.abc import Iterable, Mapping
 
 import winrt.windows.ui.notifications.management as management
 from PyQt6.QtCore import QThread, pyqtSignal
+from winrt.windows.ui.notifications import NotificationKinds, UserNotification
+
+
+def count_by_app(names: Iterable[str]) -> dict[str, int]:
+    """Count notifications per app, keyed by the display name stripped and lowercased.
+
+    Blank names are skipped.
+    """
+    counts: dict[str, int] = {}
+    for raw in names:
+        name = raw.strip().lower()
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def match_notification_count(process_name: str | None, counts: Mapping[str, int]) -> int:
+    """Return the notification count for the app running as *process_name*, or 0.
+
+    The process name without ``.exe`` (``WhatsApp.exe`` → ``whatsapp``) is looked up first.
+    Failing that, the first app name that contains the key, or is contained in it, wins.
+    """
+    if not process_name or not counts:
+        return 0
+    key = process_name.lower().replace(".exe", "").strip()
+    count = counts.get(key, 0)
+    if count > 0:
+        return count
+    for app_name, c in counts.items():
+        if app_name and (app_name in key or key in app_name):
+            return c
+    return 0
+
+
+def _display_name(notification: UserNotification) -> str:
+    """The notification's app display name, or "" when Windows cannot resolve it."""
+    try:
+        return notification.app_info.display_info.display_name
+    except Exception:
+        return ""
 
 
 class TaskbarNotificationMonitor(QThread):
@@ -35,9 +76,6 @@ class TaskbarNotificationMonitor(QThread):
     """
 
     counts_updated = pyqtSignal(dict)
-
-    # Toast = 1, Tile = 2, Badge = 4, Raw = 8
-    _KINDS = 1 | 4  # Toast + Badge
 
     def __init__(self, poll_interval: float = 2.0):
         super().__init__()
@@ -77,21 +115,14 @@ class TaskbarNotificationMonitor(QThread):
         except Exception as exc:
             logging.warning("TaskbarNotificationMonitor stopped: %s", exc)
 
-    async def _snapshot(self, listener) -> dict[str, int]:
+    async def _snapshot(self, listener: management.UserNotificationListener) -> dict[str, int]:
         """Return ``{app_name_lower: count}`` for all current notifications."""
-        counts: dict[str, int] = {}
         try:
-            notifications = await listener.get_notifications_async(self._KINDS)
-            for notif in notifications:
-                try:
-                    name = notif.app_info.display_info.display_name.strip().lower()
-                    if name:
-                        counts[name] = counts.get(name, 0) + 1
-                except Exception:
-                    pass
+            notifications = await listener.get_notifications_async(NotificationKinds.TOAST)
+            return count_by_app(_display_name(n) for n in notifications)
         except Exception as exc:
             logging.debug("TaskbarNotificationMonitor snapshot error: %s", exc)
-        return counts
+            return {}
 
     # ------------------------------------------------------------------
     # QThread interface
@@ -117,7 +148,7 @@ class TaskbarNotificationMonitor(QThread):
     def stop(self) -> None:
         self._running = False
         try:
-            if self._loop and not self._loop.is_closed():
+            if not self._loop.is_closed():
                 self._loop.call_soon_threadsafe(self._loop.stop)
         except Exception as exc:
             logging.debug("TaskbarNotificationMonitor stop error: %s", exc)
