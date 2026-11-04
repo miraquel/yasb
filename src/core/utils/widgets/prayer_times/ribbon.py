@@ -10,13 +10,19 @@ Every colour and dimension arrives from the stylesheet as a ``-qproperty-``, so
 the ribbon carries no appearance of its own (see docs/Styling.md).
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, override
 
-from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtProperty
-from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPath
+import PyQt6.QtCore as QtCore
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
+from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPath, QPaintEvent
 from PyQt6.QtWidgets import QFrame
 
 from core.utils.widgets.prayer_times.schedule import DAWN, DAY, DUSK, NIGHT
+
+# pyqtProperty exists at runtime but is missing from the PyQt6 type stubs
+pyqtProperty: Callable[..., Any] = getattr(QtCore, "pyqtProperty")
 
 
 @dataclass(frozen=True)
@@ -59,107 +65,107 @@ class DayRibbon(QFrame):
     # Stylesheet-facing properties
     # ------------------------------------------------------------------
 
-    @pyqtProperty(QColor)
-    def nightcolor(self) -> QColor:
+    def _get_nightcolor(self) -> QColor:
         return self._night
 
-    @nightcolor.setter
-    def nightcolor(self, value: QColor) -> None:
+    def _set_nightcolor(self, value: QColor) -> None:
         self._night = QColor(value)
         self.update()
 
-    @pyqtProperty(QColor)
-    def dawncolor(self) -> QColor:
+    nightcolor: QColor = pyqtProperty(QColor, _get_nightcolor, _set_nightcolor)
+
+    def _get_dawncolor(self) -> QColor:
         return self._dawn
 
-    @dawncolor.setter
-    def dawncolor(self, value: QColor) -> None:
+    def _set_dawncolor(self, value: QColor) -> None:
         self._dawn = QColor(value)
         self.update()
 
-    @pyqtProperty(QColor)
-    def daycolor(self) -> QColor:
+    dawncolor: QColor = pyqtProperty(QColor, _get_dawncolor, _set_dawncolor)
+
+    def _get_daycolor(self) -> QColor:
         return self._day
 
-    @daycolor.setter
-    def daycolor(self, value: QColor) -> None:
+    def _set_daycolor(self, value: QColor) -> None:
         self._day = QColor(value)
         self.update()
 
-    @pyqtProperty(QColor)
-    def duskcolor(self) -> QColor:
+    daycolor: QColor = pyqtProperty(QColor, _get_daycolor, _set_daycolor)
+
+    def _get_duskcolor(self) -> QColor:
         return self._dusk
 
-    @duskcolor.setter
-    def duskcolor(self, value: QColor) -> None:
+    def _set_duskcolor(self, value: QColor) -> None:
         self._dusk = QColor(value)
         self.update()
 
-    @pyqtProperty(QColor)
-    def tickcolor(self) -> QColor:
+    duskcolor: QColor = pyqtProperty(QColor, _get_duskcolor, _set_duskcolor)
+
+    def _get_tickcolor(self) -> QColor:
         return self._tick
 
-    @tickcolor.setter
-    def tickcolor(self, value: QColor) -> None:
+    def _set_tickcolor(self, value: QColor) -> None:
         self._tick = QColor(value)
         self.update()
 
-    @pyqtProperty(QColor)
-    def passedtickcolor(self) -> QColor:
+    tickcolor: QColor = pyqtProperty(QColor, _get_tickcolor, _set_tickcolor)
+
+    def _get_passedtickcolor(self) -> QColor:
         return self._passed_tick
 
-    @passedtickcolor.setter
-    def passedtickcolor(self, value: QColor) -> None:
+    def _set_passedtickcolor(self, value: QColor) -> None:
         self._passed_tick = QColor(value)
         self.update()
 
-    @pyqtProperty(QColor)
-    def nowcolor(self) -> QColor:
+    passedtickcolor: QColor = pyqtProperty(QColor, _get_passedtickcolor, _set_passedtickcolor)
+
+    def _get_nowcolor(self) -> QColor:
         return self._now_color
 
-    @nowcolor.setter
-    def nowcolor(self, value: QColor) -> None:
+    def _set_nowcolor(self, value: QColor) -> None:
         self._now_color = QColor(value)
         self.update()
 
-    @pyqtProperty(int)
-    def bandheight(self) -> int:
+    nowcolor: QColor = pyqtProperty(QColor, _get_nowcolor, _set_nowcolor)
+
+    def _get_bandheight(self) -> int:
         return self._band_height
 
-    @bandheight.setter
-    def bandheight(self, value: int) -> None:
+    def _set_bandheight(self, value: int) -> None:
         self._band_height = max(1, int(value))
         self.updateGeometry()
         self.update()
 
-    @pyqtProperty(int)
-    def tickwidth(self) -> int:
+    bandheight: int = pyqtProperty(int, _get_bandheight, _set_bandheight)
+
+    def _get_tickwidth(self) -> int:
         return self._tick_width
 
-    @tickwidth.setter
-    def tickwidth(self, value: int) -> None:
+    def _set_tickwidth(self, value: int) -> None:
         self._tick_width = max(0, int(value))
         self.update()
 
-    @pyqtProperty(int)
-    def tickheight(self) -> int:
+    tickwidth: int = pyqtProperty(int, _get_tickwidth, _set_tickwidth)
+
+    def _get_tickheight(self) -> int:
         return self._tick_height
 
-    @tickheight.setter
-    def tickheight(self, value: int) -> None:
+    def _set_tickheight(self, value: int) -> None:
         self._tick_height = max(0, int(value))
         self.updateGeometry()
         self.update()
 
-    @pyqtProperty(int)
-    def nowradius(self) -> int:
+    tickheight: int = pyqtProperty(int, _get_tickheight, _set_tickheight)
+
+    def _get_nowradius(self) -> int:
         return self._now_radius
 
-    @nowradius.setter
-    def nowradius(self, value: int) -> None:
+    def _set_nowradius(self, value: int) -> None:
         self._now_radius = max(0, int(value))
         self.updateGeometry()
         self.update()
+
+    nowradius: int = pyqtProperty(int, _get_nowradius, _set_nowradius)
 
     # ------------------------------------------------------------------
     # Content
@@ -182,11 +188,13 @@ class DayRibbon(QFrame):
         self._now = now
         self.update()
 
+    @override
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt naming
         # Room for the now cap above the band, the band, a breathing gap, and the tick
         # lane below it; the stylesheet can still set min-height and max-height on top.
         return QSize(0, self._now_radius + self._band_height + 3 + self._tick_height)
 
+    @override
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt naming
         return self.sizeHint()
 
@@ -207,7 +215,8 @@ class DayRibbon(QFrame):
                 gradient.setColorAt(min(max(fraction, 0.0), 1.0), self._role_color(role))
         return QBrush(gradient)
 
-    def paintEvent(self, event) -> None:  # noqa: N802 - Qt naming
+    @override
+    def paintEvent(self, a0: QPaintEvent | None) -> None:  # noqa: N802 - Qt naming
         rect = QRectF(self.rect())
         if rect.width() <= 0 or rect.height() <= 0:
             return

@@ -167,8 +167,8 @@ prayer_times:
   type: "yasb.prayer_times.PrayerTimesWidget"
   options:
     label: "{icon} {next_prayer} {next_prayer_time}"
-    latitude: -6.178306
-    longitude: 106.631889
+    latitude: -6.1754    # central Jakarta
+    longitude: 106.8272
     method: 20         # Kementerian Agama Republik Indonesia
     timezone: "Asia/Jakarta"
 ```
@@ -181,8 +181,8 @@ prayer_times:
   options:
     label: "<span>{icon}</span> {next_prayer} {next_prayer_time}"
     label_alt: "Fajr {fajr} · Dhuhr {dhuhr} · Asr {asr} · Maghrib {maghrib} · Isha {isha}"
-    latitude: -6.178306
-    longitude: 106.631889
+    latitude: -6.1754    # central Jakarta
+    longitude: 106.8272
     method: 20                        # Kementerian Agama Republik Indonesia
     school: 0                         # Shafi'i / Standard
     midnight_mode: 0

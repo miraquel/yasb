@@ -336,7 +336,7 @@ class LightStopsTest(unittest.TestCase):
         )
 
     def test_daylight_is_lit_and_the_small_hours_are_not(self) -> None:
-        by_role = {}
+        by_role: dict[str, list[float]] = {}
         for fraction, role in self.stops:
             by_role.setdefault(role, []).append(fraction)
 

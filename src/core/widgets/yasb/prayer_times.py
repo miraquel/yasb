@@ -1,7 +1,8 @@
 import logging
 import re
 import urllib.parse
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from PyQt6.QtCore import QEasingCurve, Qt, QTimer, QVariantAnimation
@@ -41,6 +42,52 @@ _FLASH_STALE_AFTER = timedelta(minutes=2)
 _PROGRESS_STEPS = 1000
 
 
+@dataclass(frozen=True)
+class _RibbonParts:
+    """The day ribbon section's widgets, kept so the minute tick can update them in place."""
+
+    frame: QFrame
+    ribbon: DayRibbon
+    sunrise_icon: QLabel
+    sunrise: QLabel
+    daylight: QLabel
+    sunset: QLabel
+    sunset_icon: QLabel
+
+    def widgets(self) -> tuple[QWidget, ...]:
+        return (self.frame, self.ribbon, self.sunrise_icon, self.sunrise, self.daylight, self.sunset, self.sunset_icon)
+
+
+@dataclass(frozen=True)
+class _HeroParts:
+    """The hero block's widgets: the current or next prayer and its countdown."""
+
+    frame: QFrame
+    icon: QLabel
+    name: QLabel
+    countdown: QLabel
+    progress: QProgressBar
+    from_label: QLabel
+    to_label: QLabel
+
+    def widgets(self) -> tuple[QWidget, ...]:
+        return (self.frame, self.icon, self.name, self.countdown, self.progress, self.from_label, self.to_label)
+
+
+@dataclass(frozen=True)
+class _RowParts:
+    """One prayer row's widgets."""
+
+    row: QFrame
+    icon: QLabel
+    name: QLabel
+    time: QLabel
+    remaining: QLabel
+
+    def widgets(self) -> tuple[QWidget, ...]:
+        return (self.row, self.icon, self.name, self.time, self.remaining)
+
+
 class PrayerTimesWidget(BaseWidget):
     """Widget that displays Islamic prayer times sourced from the Aladhan API.
 
@@ -65,14 +112,14 @@ class PrayerTimesWidget(BaseWidget):
         self._meta: dict[str, Any] = {}
         self._schedule: list[PrayerTime] = []
         self._solar: dict[str, PrayerTime] = {}
-        self._base_date = None
+        self._base_date: date | None = None
         self._tz_name: str | None = None
         self._popup: PopupWidget | None = None
         self._popup_layout: QVBoxLayout | None = None
-        self._popup_key: tuple | None = None
-        self._popup_hero: dict[str, QWidget] = {}
-        self._popup_ribbon: dict[str, QWidget] = {}
-        self._popup_row_widgets: dict[str, dict[str, QWidget]] = {}
+        self._popup_key: tuple[object, ...] | None = None
+        self._popup_hero: _HeroParts | None = None
+        self._popup_ribbon: _RibbonParts | None = None
+        self._popup_row_widgets: dict[str, _RowParts] = {}
         self._loading: bool = True
         self._date_offset: int = 0
         self._current_date: str = datetime.now().strftime("%Y-%m-%d")
@@ -162,7 +209,8 @@ class PrayerTimesWidget(BaseWidget):
     @property
     def _prayers(self) -> list[str]:
         """Return the configured list of prayers to show, falling back to defaults."""
-        return self.config.prayers_to_show or _DEFAULT_PRAYERS
+        prayers: list[str] = list(self.config.prayers_to_show)
+        return prayers or _DEFAULT_PRAYERS
 
     @property
     def _grace(self) -> timedelta:
@@ -190,7 +238,7 @@ class PrayerTimesWidget(BaseWidget):
     # Data handling
     # ------------------------------------------------------------------
 
-    def _on_data_received(self, data: dict) -> None:
+    def _on_data_received(self, data: dict[str, Any]) -> None:
         if not data:
             return
         try:
@@ -339,8 +387,6 @@ class PrayerTimesWidget(BaseWidget):
         active_content = self.config.label_alt if self._show_alt_label else self.config.label
         if self._loading:
             for widget in active_widgets:
-                if not isinstance(widget, QLabel):
-                    continue
                 base = widget.property("base_class") or ""
                 # Leave icon span text alone; only text labels get the placeholder.
                 if "label" in base.split():
@@ -363,9 +409,6 @@ class PrayerTimesWidget(BaseWidget):
             for placeholder, value in label_options.items():
                 part = part.replace(placeholder, str(value))
             widget = active_widgets[widget_index]
-            if not isinstance(widget, QLabel):
-                widget_index += 1
-                continue
             if "<span" in part and "</span>" in part:
                 widget.setText(re.sub(r"<span.*?>|</span>", "", part).strip())
             else:
@@ -486,7 +529,8 @@ class PrayerTimesWidget(BaseWidget):
         self._popup = None
         self._popup_layout = None
         self._popup_key = None
-        self._popup_hero = {}
+        self._popup_hero = None
+        self._popup_ribbon = None
         self._popup_row_widgets = {}
 
     def _sync_popup(self) -> None:
@@ -502,7 +546,7 @@ class PrayerTimesWidget(BaseWidget):
             # Underlying C++ object already deleted.
             self._forget_popup()
 
-    def _popup_state_key(self) -> tuple:
+    def _popup_state_key(self) -> tuple[object, ...]:
         """Everything the popup's structure depends on; when it changes the popup is rebuilt."""
         return (
             self._loading,
@@ -515,14 +559,15 @@ class PrayerTimesWidget(BaseWidget):
     def _fill_popup(self, layout: QVBoxLayout) -> None:
         """Build every popup section into *layout*, replacing whatever it held before."""
         while layout.count():
-            old = layout.takeAt(0).widget()
+            item = layout.takeAt(0)
+            old = item.widget() if item is not None else None
             if old is not None:
                 old.setParent(None)
                 old.deleteLater()
         self._popup_layout = layout
         self._popup_key = self._popup_state_key()
-        self._popup_hero = {}
-        self._popup_ribbon = {}
+        self._popup_hero = None
+        self._popup_ribbon = None
         self._popup_row_widgets = {}
 
         layout.addWidget(self._build_popup_header())
@@ -556,9 +601,8 @@ class PrayerTimesWidget(BaseWidget):
         self._refresh_popup_hero()
         self._refresh_popup_rows()
 
-    def _gregorian_text(self) -> str:
+    def _gregorian_text(self, day: date) -> str:
         """Return the schedule's gregorian date, prefixed with Today/Tomorrow when it is one of those."""
-        day = self._base_date
         text = f"{day:%A} {day.day} {day:%B}"
         relative = {0: "Today", 1: "Tomorrow"}.get((day - self._now().date()).days)
         return f"{relative}, {text}" if relative else text
@@ -589,7 +633,7 @@ class PrayerTimesWidget(BaseWidget):
             hijri_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
             dates_layout.addWidget(hijri_lbl)
         if self._base_date is not None:
-            gregorian_lbl = QLabel(self._gregorian_text())
+            gregorian_lbl = QLabel(self._gregorian_text(self._base_date))
             gregorian_lbl.setProperty("class", "gregorian-date")
             gregorian_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
             dates_layout.addWidget(gregorian_lbl)
@@ -649,22 +693,22 @@ class PrayerTimesWidget(BaseWidget):
         captions_layout.addWidget(sunset_icon, alignment=Qt.AlignmentFlag.AlignVCenter)
         section_layout.addLayout(captions_layout)
 
-        self._popup_ribbon = {
-            "frame": section,
-            "ribbon": ribbon,
-            "sunrise-icon": sunrise_icon,
-            "sunrise": sunrise_lbl,
-            "daylight": daylight_lbl,
-            "sunset": sunset_lbl,
-            "sunset-icon": sunset_icon,
-        }
+        self._popup_ribbon = _RibbonParts(
+            frame=section,
+            ribbon=ribbon,
+            sunrise_icon=sunrise_icon,
+            sunrise=sunrise_lbl,
+            daylight=daylight_lbl,
+            sunset=sunset_lbl,
+            sunset_icon=sunset_icon,
+        )
         self._refresh_popup_ribbon()
         return section
 
     def _refresh_popup_ribbon(self) -> None:
         """Move the ribbon's now stem and re-mark the prayers it has gone past."""
         parts = self._popup_ribbon
-        if not parts or self._base_date is None:
+        if parts is None or self._base_date is None:
             return
         now = self._now()
         start, end = day_window(self._base_date, self._tz_name, self._schedule)
@@ -672,26 +716,25 @@ class PrayerTimesWidget(BaseWidget):
         if span <= 0:
             return
 
-        def fraction(moment) -> float:
+        def fraction(moment: datetime) -> float:
             return (moment - start).total_seconds() / span
 
         marks = [RibbonMark(at=fraction(entry.at), passed=entry.at <= now) for entry in self._schedule]
         # The stem is dropped rather than pinned to an edge once the popup has moved on to
         # tomorrow's schedule: this band is not the day the clock is in.
         position = fraction(now)
-        ribbon: DayRibbon = parts["ribbon"]  # type: ignore[assignment]
-        ribbon.set_day(light_stops(self._solar, start, end), marks, position if 0.0 <= position <= 1.0 else None)
+        parts.ribbon.set_day(light_stops(self._solar, start, end), marks, position if 0.0 <= position <= 1.0 else None)
 
         sunrise = self._solar.get("Sunrise")
         sunset = self._solar.get("Sunset") or self._solar.get("Maghrib")
         if sunrise is not None:
-            parts["sunrise"].setText(sunrise.time_str)  # type: ignore[attr-defined]
+            parts.sunrise.setText(sunrise.time_str)
         if sunset is not None:
-            parts["sunset"].setText(sunset.time_str)  # type: ignore[attr-defined]
+            parts.sunset.setText(sunset.time_str)
         if sunrise is not None and sunset is not None:
             length = format_span(sunrise.at, sunset.at)
-            parts["daylight"].setText(f"{length} of daylight" if length else "")  # type: ignore[attr-defined]
-        refresh_widget_style(*parts.values())
+            parts.daylight.setText(f"{length} of daylight" if length else "")
+        refresh_widget_style(*parts.widgets())
 
     def _build_popup_hero(self) -> QFrame:
         """Build the hero block: the current or next prayer, its countdown and progress since the previous one."""
@@ -735,15 +778,15 @@ class PrayerTimesWidget(BaseWidget):
         captions_layout.addWidget(to_lbl)
         hero_layout.addLayout(captions_layout)
 
-        self._popup_hero = {
-            "frame": hero,
-            "icon": icon_lbl,
-            "name": name_lbl,
-            "countdown": countdown_lbl,
-            "progress": progress,
-            "from": from_lbl,
-            "to": to_lbl,
-        }
+        self._popup_hero = _HeroParts(
+            frame=hero,
+            icon=icon_lbl,
+            name=name_lbl,
+            countdown=countdown_lbl,
+            progress=progress,
+            from_label=from_lbl,
+            to_label=to_lbl,
+        )
         self._refresh_popup_hero()
         return hero
 
@@ -751,7 +794,7 @@ class PrayerTimesWidget(BaseWidget):
         """Fill the hero widgets from the current or next prayer."""
         hero = self._popup_hero
         entry = self._next_entry()
-        if not hero or entry is None:
+        if hero is None or entry is None:
             return
         now = self._now()
         previous = previous_entry(self._schedule, entry)
@@ -759,14 +802,14 @@ class PrayerTimesWidget(BaseWidget):
         # and `now` for the one window the whole widget exists for: the prayer that has just
         # been called and is still inside its grace period.
         state = " now" if self._is_live(entry) else ""
-        hero["frame"].setProperty("class", f"hero {entry.name.lower()}{state}")
-        hero["icon"].setText(self._icon_map.get(entry.name, self.config.icons.default))
-        hero["name"].setText(entry.name)
-        hero["countdown"].setText(format_countdown(entry.at, now))
-        hero["progress"].setValue(round(progress_fraction(previous.at, entry.at, now) * _PROGRESS_STEPS))
-        hero["from"].setText(f"{previous.name} {previous.time_str}")
-        hero["to"].setText(entry.time_str)
-        refresh_widget_style(*hero.values())
+        hero.frame.setProperty("class", f"hero {entry.name.lower()}{state}")
+        hero.icon.setText(self._icon_map.get(entry.name, self.config.icons.default))
+        hero.name.setText(entry.name)
+        hero.countdown.setText(format_countdown(entry.at, now))
+        hero.progress.setValue(round(progress_fraction(previous.at, entry.at, now) * _PROGRESS_STEPS))
+        hero.from_label.setText(f"{previous.name} {previous.time_str}")
+        hero.to_label.setText(entry.time_str)
+        refresh_widget_style(*hero.widgets())
 
     def _is_live(self, entry: PrayerTime) -> bool:
         """Return True while *entry* is the prayer that has been called and is still in grace."""
@@ -847,13 +890,13 @@ class PrayerTimesWidget(BaseWidget):
             row_layout.addWidget(remaining_lbl)
 
             rows_layout.addWidget(row)
-            self._popup_row_widgets[entry.name] = {
-                "row": row,
-                "icon": icon_lbl,
-                "name": name_lbl,
-                "time": time_lbl,
-                "remaining": remaining_lbl,
-            }
+            self._popup_row_widgets[entry.name] = _RowParts(
+                row=row,
+                icon=icon_lbl,
+                name=name_lbl,
+                time=time_lbl,
+                remaining=remaining_lbl,
+            )
 
         return rows_container
 
@@ -889,8 +932,8 @@ class PrayerTimesWidget(BaseWidget):
             widgets = self._popup_row_widgets.get(entry.name)
             if widgets is None:
                 continue
-            row: QFrame = widgets["row"]  # type: ignore[assignment]
-            remaining_lbl: QLabel = widgets["remaining"]  # type: ignore[assignment]
+            row = widgets.row
+            remaining_lbl = widgets.remaining
             delta_text = self._row_delta_text(entry, upcoming)
             remaining_text, remaining_class, remaining_align = self._remaining_slot(delta_text)
             remaining_lbl.setText(remaining_text)
@@ -899,7 +942,7 @@ class PrayerTimesWidget(BaseWidget):
             row.setProperty("class", self._row_class(entry, next_name, delta_text))
             # Descendant rules such as `.prayer-row.active .prayer-name` only re-apply once the
             # children are repolished as well, not just the row whose class changed.
-            refresh_widget_style(*widgets.values())
+            refresh_widget_style(*widgets.widgets())
 
     # ------------------------------------------------------------------
     # Toggle
