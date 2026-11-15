@@ -10,7 +10,9 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QVBoxLayout, QWid
 from core.utils.utilities import (
     PopupWidget,
     build_progress_widget,
+    level_color,
     refresh_widget_style,
+    set_container_level,
 )
 from core.utils.win32.bindings.kernel32 import GetDiskFreeSpaceEx, get_volume_label
 from core.validation.widgets.yasb.disk import DiskConfig
@@ -73,6 +75,9 @@ class DiskWidget(BaseWidget):
 
         disk_space = self._get_space()
         percent_value = float(disk_space["used"]["percent"].rstrip("%")) if disk_space else 0
+        level = self._get_disk_threshold(percent_value)
+        # On the container, so CSS can colour the icon too: .widget-container.status-high .icon
+        set_container_level(self._widget_container, level)
 
         if self.config.progress_bar.enabled and self.progress_widget:
             if self._widget_container_layout.indexOf(self.progress_widget) == -1:
@@ -82,6 +87,9 @@ class DiskWidget(BaseWidget):
                 )
 
             self.progress_widget.set_value(percent_value)
+            self.progress_widget.set_color(
+                level_color(self.config.progress_bar.level_colors, level, self.config.progress_bar.color)
+            )
 
         for part in label_parts:
             part = part.strip()
@@ -99,7 +107,7 @@ class DiskWidget(BaseWidget):
                         else part
                     )
                     active_widgets[widget_index].setText(formatted_text)
-                    target_class = f"{label_class} status-{self._get_disk_threshold(percent_value)}"
+                    target_class = f"{label_class} status-{level}"
                     if active_widgets[widget_index].property("class") != target_class:
                         active_widgets[widget_index].setProperty("class", target_class)
                         refresh_widget_style(active_widgets[widget_index])

@@ -1,7 +1,7 @@
 import math
 from enum import StrEnum
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
 from PyQt6.QtCore import (
     QEasingCurve,
@@ -82,6 +82,53 @@ def refresh_widget_style(*widgets: QWidget | None) -> None:
             pass
 
 
+class LevelColors(Protocol):
+    """A progress bar's optional ring colour per threshold level (None leaves `color` in place)."""
+
+    @property
+    def low(self) -> str | None: ...
+    @property
+    def medium(self) -> str | None: ...
+    @property
+    def high(self) -> str | None: ...
+    @property
+    def critical(self) -> str | None: ...
+
+
+def set_container_level(container: QWidget, level: str) -> bool:
+    """Put `status-<level>` on a widget container, replacing any earlier one.
+
+    Qt does not re-match descendant selectors such as `.widget-container.status-high .icon` when
+    only the container's class changes, so the container and everything in it are re-polished.
+    That happens only when the level actually changes; returns whether it did.
+    """
+    current = str(container.property("class") or "")
+    tokens = [t for t in current.split() if not t.startswith("status-")]
+    new_class = " ".join([*tokens, f"status-{level}"])
+    if current == new_class:
+        return False
+    container.setProperty("class", new_class)
+    refresh_widget_style(container, *container.findChildren(QWidget))
+    return True
+
+
+def level_color(level_colors: LevelColors | None, level: str, fallback: str | list[str]) -> str | list[str]:
+    """The ring colour for a threshold level: its entry in `level_colors`, else `fallback`.
+
+    `level_colors` is a progress bar's optional per-level model (None when unset); a level it
+    leaves out keeps the bar's own `color`, gradient list included.
+    """
+    if level_colors is None:
+        return fallback
+    colors = {
+        "low": level_colors.low,
+        "medium": level_colors.medium,
+        "high": level_colors.high,
+        "critical": level_colors.critical,
+    }
+    return colors.get(level) or fallback
+
+
 def align_label_text(root: QWidget | None) -> None:
     """Put every QLabel's text back on its box's left edge.
 
@@ -147,6 +194,7 @@ def build_progress_widget(parent: QWidget, options: dict[str, Any]) -> ProgressW
         animation=options["animation"],
         progress_type=options.get("progress_type", "circular"),
         radius=options.get("radius", 0),
+        full_size=options.get("full_size", False),
     )
     return ProgressWidget(progress_bar)
 

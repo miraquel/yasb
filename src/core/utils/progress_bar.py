@@ -24,6 +24,7 @@ class ProgressBar(QFrame):
         animation: bool = True,
         progress_type: str = "circular",
         radius: int = 0,
+        full_size: bool = False,
     ):
         super().__init__(parent)
 
@@ -36,6 +37,7 @@ class ProgressBar(QFrame):
         self._animation_enabled = animation
         self._progress_type = progress_type
         self._radius = radius
+        self._full_size = full_size
 
         self._animation = QPropertyAnimation(self, b"animatedValue")
         self._animation.setDuration(400)
@@ -66,7 +68,7 @@ class ProgressBar(QFrame):
         """Update the angle calculations based on current value."""
         self._angle_span = (self._value / 100.0) * 360
 
-    def _create_circular_progress_brush(self, rect: QRect) -> QConicalGradient | QColor:
+    def _create_circular_progress_brush(self, rect: QRect | QRectF) -> QConicalGradient | QColor:
         """Create a brush for the circular progress arc (solid color or gradient)."""
         if isinstance(self._color_config, list) and len(self._color_config) > 1:
             center = QPointF(rect.center())
@@ -106,10 +108,24 @@ class ProgressBar(QFrame):
         elif self._progress_type in ["linear_horizontal", "linear_vertical"]:
             self._paint_linear(painter)
 
-    def _paint_circular(self, painter: QPainter) -> None:
+    def _circular_rect(self) -> QRect | QRectF:
+        """The rectangle the ring's stroke is centred on.
+
+        By default the stroke is inset by a whole pixel more than half its thickness, so a
+        16px ring with thickness 3 is 13px across and its edges fall on half pixels. With
+        `full_size` the stroke reaches the edge of the box: 16px across, edges on whole pixels.
+        The default stays an integer QRect, so a gradient keeps its centre and an unset ring
+        paints exactly as before.
+        """
+        if self._full_size:
+            half = self._thickness / 2
+            return QRectF(self.contentsRect()).adjusted(half, half, -half, -half)
         # Calculate margin based on thickness and ensure it is at least 2
         margin = (self._thickness + 1) // 2 + 1
-        rect = self.contentsRect().adjusted(margin, margin, -margin, -margin)
+        return self.contentsRect().adjusted(margin, margin, -margin, -margin)
+
+    def _paint_circular(self, painter: QPainter) -> None:
+        rect = self._circular_rect()
 
         if rect.width() <= 0 or rect.height() <= 0:
             return
