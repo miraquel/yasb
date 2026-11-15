@@ -120,6 +120,7 @@ choco install yasb
 | [Notes](https://github.com/amnweb/yasb/wiki/(Widget)-Notes) | A simple notes widget that allows you to add, delete, and view notes. |
 | [OBS](https://github.com/amnweb/yasb/wiki/(Widget)-Obs) | Integrates with OBS Studio to show various streaming information. |
 | [Open Meteo](https://github.com/amnweb/yasb/wiki/(Widget)-Open-Meteo) | Displays weather information using the Open Meteo API. |
+| [Outlook Calendar](https://github.com/amnweb/yasb/wiki/(Widget)-Outlook-Calendar) | Counts down to the next event on your Outlook calendar, with the coming days in a popup. |
 | [Power Plan](https://github.com/amnweb/yasb/wiki/(Widget)-Power-Plan) | Displays the current power plan and allows switching between plans. |
 | [Server Monitor](https://github.com/amnweb/yasb/wiki/(Widget)-Server-Monitor) | Monitors server status. |
 | [Systray](https://github.com/amnweb/yasb/wiki/(Widget)-Systray) | Displays system tray icons. |
