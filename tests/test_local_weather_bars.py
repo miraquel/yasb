@@ -55,6 +55,8 @@ class SkyFadeTests(unittest.TestCase):
         sky.resize(340, 150)
         sky.fxopacity = 0  # the gradient alone, so the fade is all that differs
         sky.edgefade = 0
+        # A fixed phase, not the clock: every phase's gradient is transparent at the top.
+        sky.model.force_phase = "day"
         sky._tick()
         return sky
 
@@ -64,12 +66,13 @@ class SkyFadeTests(unittest.TestCase):
         return image.pixelColor(x, y).alpha()
 
     def test_sky_left_fade(self):
+        # Sampled near the bottom: higher up the gradient's alpha is too small for a ratio.
         sky = self.scene()
-        before, right = self.alpha(sky, 68, 10), self.alpha(sky, 306, 10)
+        before, right = self.alpha(sky, 68, 140), self.alpha(sky, 306, 140)
         sky.leftfade = 75
-        self.assertGreater(before, 0)
-        self.assertTrue(0.25 < self.alpha(sky, 68, 10) / before < 0.34)
-        self.assertEqual(self.alpha(sky, 306, 10), right)
+        self.assertGreater(before, 20)
+        self.assertTrue(0.25 < self.alpha(sky, 68, 140) / before < 0.34)
+        self.assertEqual(self.alpha(sky, 306, 140), right)
 
     def test_sky_bottom_fade(self):
         sky = self.scene()
