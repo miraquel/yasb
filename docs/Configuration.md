@@ -34,7 +34,20 @@ Valid options are:
 - `freetype`: Uses the FreeType font rendering engine.
 
 > **Note:**
-> The default font engine is GDI, changing the font engine may cause different font rendering quality. You can experiment with different engines to see which one works best for you. Font names can be different between engines, example: gdi `"font-family: 'JetBrainsMono NFP';"` may need to be changed to `"font-family: 'JetBrainsMono Nerd Font Propo'"` for DirectWrite.
+> The default font engine is GDI, changing the font engine may cause different font rendering quality. You can experiment with different engines to see which one works best for you. Font names can be different between engines, example: gdi `"font-family: 'JetBrainsMono NFP';"` may need to be changed to `"font-family: 'JetBrainsMono Nerd Font Propo'"` for DirectWrite. Listing both names (`"font-family: 'JetBrainsMono NFP', 'JetBrainsMono Nerd Font Propo';"`) works under every engine, since Qt takes the first that resolves.
+
+## YASB Font Rendering
+Two more `.env` variables tune how text is drawn. Both are optional; unset, rendering follows the system.
+- `YASB_FONT_ANTIALIAS`: `subpixel` (default) keeps Windows' ClearType colour fringes; `grayscale` smooths glyph edges in plain grey. Honoured by the `gdi` and `freetype` engines; Qt's DirectWrite (`native`) engine ignores it.
+- `YASB_FONT_HINTING`: `default`, `none`, `vertical` or `full` — how hard glyphs are snapped to the pixel grid.
+
+```
+YASB_FONT_ENGINE=gdi
+YASB_FONT_ANTIALIAS=grayscale
+```
+
+> **Note:**
+> Values in `.env` override the same variables in the inherited environment, so editing `.env` takes effect on the next reload.
 
 
 ## Status Bar Root Configuration
