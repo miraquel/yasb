@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import Field
 
 from core.validation.widgets.base_model import CallbacksConfig, CustomBaseModel, KeybindingConfig
-from core.validation.widgets.yasb.claude_usage import ClaudeLevelColorsConfig, ClaudeSkyConfig
+from core.validation.widgets.yasb.claude_usage import ClaudeLevelColorsConfig, ClaudeSkyConfig, UsageGaugeConfig
 
 
 class CodexUsageCallbacksConfig(CallbacksConfig):
@@ -119,6 +119,9 @@ class CodexUsageConfig(CustomBaseModel):
     hearts: CodexHeartsConfig = CodexHeartsConfig()
     footer: CodexFooterConfig = CodexFooterConfig()
     progress_bar: CodexUsageProgressBarConfig = CodexUsageProgressBarConfig()
+    # The fill behind the label, as on the Claude widget. With two windows the shorter drives
+    # until the longer reaches crit_percent; a plan reporting one window just fills to it.
+    gauge: UsageGaugeConfig = UsageGaugeConfig()
     callbacks: CodexUsageCallbacksConfig = CodexUsageCallbacksConfig()
     menu: CodexUsageMenuConfig = CodexUsageMenuConfig()
     keybindings: list[KeybindingConfig] = []

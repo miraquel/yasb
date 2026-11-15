@@ -72,6 +72,17 @@ class ClaudeUsageProgressBarConfig(CustomBaseModel):
     level_colors: ClaudeLevelColorsConfig | None = None
 
 
+class UsageGaugeConfig(CustomBaseModel):
+    # The widget fills from its left edge like a tank to the share used of the window its number
+    # shows, with the other window as a thin line along the bottom. The short window drives until
+    # the long one reaches crit_percent; then the long one takes the fill, and {gauge_window} names
+    # it ("7d"). Usually paired with progress_bar.enabled: false. Colours, opacities, line height
+    # and corner radii are `.gauge` -qproperty-* in styles.css, read once at start: edits to them
+    # need a full restart. Shared with the Codex widget.
+    enabled: bool = False
+    animation: bool = True
+
+
 class ClaudeClawdConfig(CustomBaseModel):
     # Clawd, the Claude Code crab, living in the popup beside the 5-hour reading.
     enabled: bool = False
@@ -179,6 +190,7 @@ class ClaudeUsageConfig(CustomBaseModel):
     footer: ClaudeFooterConfig = ClaudeFooterConfig()
     # Tracks whichever window the bar label is currently showing (5h, or 7d after toggle_label).
     progress_bar: ClaudeUsageProgressBarConfig = ClaudeUsageProgressBarConfig()
+    gauge: UsageGaugeConfig = UsageGaugeConfig()
     callbacks: ClaudeUsageCallbacksConfig = ClaudeUsageCallbacksConfig()
     menu: ClaudeUsageMenuConfig = ClaudeUsageMenuConfig()
     keybindings: list[KeybindingConfig] = []
