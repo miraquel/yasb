@@ -128,7 +128,7 @@ struct WINNOTIFYICONIDENTIFIER {
 
 // The members of the anonymous unions inside PROPVARIANT (propidlbase.h) and INPUT (winuser.h)
 // that the Python code uses.
-union PROPVARIANT_UNION { LPWSTR pwszVal; LPSTR pszVal; ULONG ulVal; ULARGE_INTEGER uhVal; VARIANT_BOOL boolVal; BLOB blob; };
+union PROPVARIANT_UNION { LPWSTR pwszVal; LPSTR pszVal; ULONG ulVal; ULARGE_INTEGER uhVal; VARIANT_BOOL boolVal; CLSID *puuid; BLOB blob; };
 union INPUT_UNION { MOUSEINPUT mi; KEYBDINPUT ki; HARDWAREINPUT hi; };
 
 // adl_structures.h, AMD Display Library SDK.
@@ -196,6 +196,7 @@ UNDOCUMENTED_INTERFACES: dict[str, str] = {
     "core.utils.win32.bindings.shell32.IQuietHoursSettings": "undocumented shell interface",
     "core.utils.win32.bindings.shell32.ITipInvocation": "undocumented shell interface",
     "core.widgets.services.windows_desktops.interfaces.IApplicationView": "undocumented shell interface",
+    "core.widgets.services.windows_desktops.interfaces.IApplicationViewChangeListener": "undocumented shell interface",
     "core.widgets.services.windows_desktops.interfaces.IApplicationViewCollection": "undocumented shell interface",
     "core.widgets.services.windows_desktops.interfaces.IVirtualDesktop2": "undocumented shell interface",
     "core.widgets.services.windows_desktops.interfaces.IVirtualDesktopNotificationService": "undocumented shell interface",
